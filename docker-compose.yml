@@ -1,0 +1,12 @@
+services:
+  secret-santa-bot:
+    build: .
+    container_name: secret_santa_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ:-Europe/Moscow}
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
