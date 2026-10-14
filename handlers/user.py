@@ -9,7 +9,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import GIFT_BUDGET, ADMIN_IDS
 from database import db
-from states import Registration, ChangeWish, ChangeGender, SetDisplayName
+from states import (
+    Registration, ChangeWish, ChangeGender, SetDisplayName,
+    AnonymousChatSanta, AnonymousChatReceiver
+)
 from keyboards import (
     get_start_keyboard,
     get_gender_keyboard,
@@ -26,11 +29,11 @@ from utils import (
     generate_progress_bar
 )
 from custom_emojis import (
-    E_USER, E_USERS, E_GIFT, E_GIFT_STAR, E_GIFT_GIVE, E_CHECK, E_CROSS,
-    E_ERASE, E_TRASH, E_HOURGLASS, E_CALENDAR, E_CLOCK, E_MONEY, E_PARTY,
-    E_TAG, E_LOCK, E_EDIT, E_REPEAT, E_LINK, E_SPARKLES, E_STATS, E_WARNING,
-    E_QUESTION, E_BELL, E_MESSAGE, E_INFO, E_FILE, E_SETTINGS, E_ADD_USER,
-    E_SEARCH, emoji_id
+    E_USER, E_USERS, E_GIFT, E_GIFT_STAR, E_CHECK, E_CROSS,
+    E_HOURGLASS, E_CLOCK, E_MONEY, E_PARTY, E_TAG, E_LOCK,
+    E_EDIT, E_REPEAT, E_LINK, E_SPARKLES, E_STATS, E_WARNING,
+    E_BELL, E_MESSAGE, E_FILE, E_SETTINGS, E_NEW_MESSAGE,
+    E_MAGIC, emoji_id
 )
 from services.notifications import notify_admins_registration_complete
 
@@ -274,7 +277,8 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
             f"• Вы дарите подарок: <b>{gender_text}</b>\n"
         )
         if receiver_data:
-            text += f"• Желание: «{receiver_data.get('wish', 'не указано')}»\n"
+            rec_wish = html.escape(receiver_data.get('wish', 'не указано'), quote=False)
+            text += f"• Желание: «{rec_wish}»\n"
             receiver_links = receiver_data.get('wish_link', '')
             if receiver_links:
                 formatted_rec = format_wish_links(receiver_links)
@@ -285,7 +289,8 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
         text += (
             f"\n{E_MONEY} Бюджет: до <b>{GIFT_BUDGET} ₽</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"С наступающим Новым Годом! {E_PARTY}{E_SPARKLES}"
+            f"С наступающим Новым Годом! {E_PARTY}{E_SPARKLES}\n\n"
+            f"{E_NEW_MESSAGE} <i>Вы можете задать подопечному анонимный вопрос кнопкой ниже!</i>"
         )
     else:
         count = await db.get_participants_count()
@@ -296,6 +301,8 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
     if not user_data.get('gift_to_gender'):
         keyboard.button(text="Изменить желание", callback_data="change_wish_menu", icon_custom_emoji_id=emoji_id("edit"))
         keyboard.button(text="Изменить пол", callback_data="change_gender_menu", icon_custom_emoji_id=emoji_id("repeat"))
+    else:
+        keyboard.button(text="Спросить подопечного анонимно", callback_data="ask_receiver", icon_custom_emoji_id=emoji_id("new_message"))
     keyboard.button(text="Назад в меню", callback_data="back_to_main", icon_custom_emoji_id=emoji_id("back"))
     keyboard.adjust(1)
     
@@ -815,3 +822,271 @@ async def back_to_main_menu(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
     await callback.answer()
+
+# -------------------------------------------------------------
+# Анонимный чат «Санта ↔ Подопечный» (Анонимные записки)
+# -------------------------------------------------------------
+
+@user_router.callback_query(F.data == "ask_receiver")
+async def ask_receiver_start(callback: CallbackQuery, state: FSMContext):
+    """Санта открывает меню отправки анонимного вопроса своему подопечному"""
+    user_data = await db.get_user(callback.from_user.id)
+    if not user_data or not user_data.get("gift_to_user_id"):
+        await callback.answer("Распределение ещё не проведено или у вас нет подопечного!", show_alert=True)
+        return
+    
+    if not await db.check_anonymous_rate_limit(callback.from_user.id, limit=5, window_seconds=60):
+        await callback.answer("Слишком много сообщений! Подождите минуту перед следующей запиской.", show_alert=True)
+        return
+    
+    receiver_id = user_data["gift_to_user_id"]
+    await state.set_state(AnonymousChatSanta.entering_question)
+    await state.update_data(receiver_id=receiver_id)
+    
+    text = (
+        f"{E_GIFT} <b>Анонимная записка подопечному</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Здесь вы можете задать любой вопрос вашему подопечному, чтобы подарок точно пришёлся по душе "
+        f"(размер одежды, любимый цвет, аллергии, модель гаджета и др.).\n\n"
+        f"{E_LOCK} <b>Ваша личность останется в секрете!</b>\n"
+        f"Подопечный получит вопрос от имени «Тайный Санта» и сможет ответить вам через бота.\n\n"
+        f"Напишите текст вопроса и отправьте сообщением:"
+    )
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Отмена", callback_data="cancel_anonymous_santa", icon_custom_emoji_id=emoji_id("back"))
+    keyboard.adjust(1)
+    
+    await callback.message.edit_text(text, reply_markup=keyboard.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+@user_router.callback_query(F.data == "cancel_anonymous_santa")
+async def cancel_anonymous_santa(callback: CallbackQuery, state: FSMContext):
+    """Отмена отправки анонимного вопроса Сантой"""
+    await state.clear()
+    await show_myinfo(callback, state)
+
+@user_router.message(AnonymousChatSanta.entering_question)
+async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
+    """Обработка текста анонимного вопроса от Санты и пересылка подопечному"""
+    if not message.text or not message.text.strip():
+        await message.answer(
+            f"{E_WARNING} Пожалуйста, отправьте текстовый вопрос для вашего подопечного.",
+            parse_mode="HTML"
+        )
+        return
+    
+    question_text = message.text.strip()
+    if len(question_text) > 1000:
+        await message.answer(
+            f"{E_WARNING} Вопрос слишком длинный (максимум 1000 символов). Пожалуйста, сократите текст.",
+            parse_mode="HTML"
+        )
+        return
+    
+    if not await db.check_anonymous_rate_limit(message.from_user.id, limit=5, window_seconds=60):
+        await message.answer(
+            f"{E_CLOCK} Вы отправляете сообщения слишком часто. Подождите минуту перед следующей запиской.",
+            parse_mode="HTML"
+        )
+        return
+    
+    state_data = await state.get_data()
+    receiver_id = state_data.get("receiver_id")
+    if not receiver_id:
+        receiver_id = await db.get_receiver_for_user(message.from_user.id)
+    
+    if not receiver_id:
+        await message.answer(f"{E_CROSS} Ошибка: подопечный не найден.", parse_mode="HTML")
+        await state.clear()
+        return
+    
+    escaped_question = html.escape(question_text, quote=False)
+    
+    receiver_text = (
+        f"{E_GIFT} <b>Вам пришла анонимная записка от вашего Тайного Санты!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"«{escaped_question}»\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{E_SPARKLES} <i>Вы можете ответить Санте анонимно, нажав кнопку ниже:</i>"
+    )
+    receiver_kb = InlineKeyboardBuilder()
+    receiver_kb.button(
+        text="Ответить Санте",
+        callback_data=f"reply_santa_{message.from_user.id}",
+        icon_custom_emoji_id=emoji_id("new_message")
+    )
+    receiver_kb.adjust(1)
+    
+    success, err = await send_message_safe(
+        bot, receiver_id, receiver_text,
+        reply_markup=receiver_kb.as_markup(),
+        parse_mode="HTML"
+    )
+    
+    if not success:
+        await message.answer(
+            f"{E_WARNING} Не удалось доставить записку подопечному. Возможно, пользователь заблокировал бота или временно недоступен.",
+            parse_mode="HTML"
+        )
+        await state.clear()
+        return
+    
+    await db.save_anonymous_note(
+        from_user_id=message.from_user.id,
+        to_user_id=receiver_id,
+        note_type="question",
+        text=question_text
+    )
+    await state.clear()
+    
+    santa_kb = InlineKeyboardBuilder()
+    santa_kb.button(text="Задать ещё вопрос", callback_data="ask_receiver", icon_custom_emoji_id=emoji_id("new_message"))
+    santa_kb.button(text="Моя анкета", callback_data="myinfo", icon_custom_emoji_id=emoji_id("gift"))
+    santa_kb.button(text="В главное меню", callback_data="back_to_main", icon_custom_emoji_id=emoji_id("back"))
+    santa_kb.adjust(1)
+    
+    await message.answer(
+        f"{E_CHECK} <b>Записка успешно доставлена вашему подопечному!</b>\n\n"
+        f"{E_HOURGLASS} Как только он ответит, вы сразу получите уведомление в этом чате.",
+        reply_markup=santa_kb.as_markup(),
+        parse_mode="HTML"
+    )
+
+@user_router.callback_query(F.data.startswith("reply_santa_"))
+async def reply_santa_start(callback: CallbackQuery, state: FSMContext):
+    """Подопечный нажимает кнопку 'Ответить Санте'"""
+    try:
+        santa_id = int(callback.data.replace("reply_santa_", ""))
+    except ValueError:
+        await callback.answer("Ошибка в данных запроса.", show_alert=True)
+        return
+    
+    actual_santa = await db.get_santa_for_user(callback.from_user.id)
+    if actual_santa:
+        santa_id = actual_santa
+    
+    if not await db.check_anonymous_rate_limit(callback.from_user.id, limit=5, window_seconds=60):
+        await callback.answer("Слишком много сообщений! Подождите минуту.", show_alert=True)
+        return
+    
+    await state.set_state(AnonymousChatReceiver.entering_reply)
+    await state.update_data(santa_id=santa_id)
+    
+    text = (
+        f"{E_MESSAGE} <b>Ответ вашему Тайному Санте</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Напишите ответ на вопрос Санты. Санта увидит только текст вашего ответа, а ваша личность останется в секрете.\n\n"
+        f"Напишите текст ответа и отправьте сообщением:"
+    )
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Отмена", callback_data="cancel_anonymous_reply", icon_custom_emoji_id=emoji_id("back"))
+    keyboard.adjust(1)
+    
+    await callback.message.edit_text(text, reply_markup=keyboard.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+@user_router.callback_query(F.data == "cancel_anonymous_reply")
+async def cancel_anonymous_reply(callback: CallbackQuery, state: FSMContext):
+    """Отмена отправки ответа Санте"""
+    await state.clear()
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Моя анкета", callback_data="myinfo", icon_custom_emoji_id=emoji_id("gift"))
+    keyboard.button(text="В главное меню", callback_data="back_to_main", icon_custom_emoji_id=emoji_id("back"))
+    keyboard.adjust(1)
+    await callback.message.edit_text(
+        f"{E_CROSS} Ответ отменён.",
+        reply_markup=keyboard.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@user_router.message(AnonymousChatReceiver.entering_reply)
+async def process_receiver_reply(message: Message, state: FSMContext, bot: Bot):
+    """Обработка ответа подопечного для Санты"""
+    if not message.text or not message.text.strip():
+        await message.answer(
+            f"{E_WARNING} Пожалуйста, отправьте текстовый ответ для вашего Тайного Санты.",
+            parse_mode="HTML"
+        )
+        return
+    
+    reply_text = message.text.strip()
+    if len(reply_text) > 1000:
+        await message.answer(
+            f"{E_WARNING} Ответ слишком длинный (максимум 1000 символов). Пожалуйста, сократите текст.",
+            parse_mode="HTML"
+        )
+        return
+    
+    if not await db.check_anonymous_rate_limit(message.from_user.id, limit=5, window_seconds=60):
+        await message.answer(
+            f"{E_CLOCK} Вы отправляете сообщения слишком часто. Подождите минуту перед следующим ответом.",
+            parse_mode="HTML"
+        )
+        return
+    
+    state_data = await state.get_data()
+    santa_id = state_data.get("santa_id")
+    if not santa_id:
+        santa_id = await db.get_santa_for_user(message.from_user.id)
+    
+    if not santa_id:
+        await message.answer(f"{E_CROSS} Ошибка: ваш Тайный Санта не найден.", parse_mode="HTML")
+        await state.clear()
+        return
+    
+    escaped_reply = html.escape(reply_text, quote=False)
+    
+    santa_text = (
+        f"{E_MESSAGE} <b>Ответ от вашего подопечного!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"«{escaped_reply}»\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{E_SPARKLES} <i>Если хотите уточнить ещё что-то, вы можете задать новый вопрос:</i>"
+    )
+    santa_kb = InlineKeyboardBuilder()
+    santa_kb.button(
+        text="Задать ещё вопрос",
+        callback_data="ask_receiver",
+        icon_custom_emoji_id=emoji_id("new_message")
+    )
+    santa_kb.button(
+        text="Моя анкета",
+        callback_data="myinfo",
+        icon_custom_emoji_id=emoji_id("gift")
+    )
+    santa_kb.adjust(1)
+    
+    success, err = await send_message_safe(
+        bot, santa_id, santa_text,
+        reply_markup=santa_kb.as_markup(),
+        parse_mode="HTML"
+    )
+    
+    if not success:
+        await message.answer(
+            f"{E_WARNING} Не удалось доставить ответ Санте. Возможно, пользователь временно недоступен.",
+            parse_mode="HTML"
+        )
+        await state.clear()
+        return
+    
+    await db.save_anonymous_note(
+        from_user_id=message.from_user.id,
+        to_user_id=santa_id,
+        note_type="reply",
+        text=reply_text
+    )
+    await state.clear()
+    
+    ack_kb = InlineKeyboardBuilder()
+    ack_kb.button(text="Моя анкета", callback_data="myinfo", icon_custom_emoji_id=emoji_id("gift"))
+    ack_kb.button(text="В главное меню", callback_data="back_to_main", icon_custom_emoji_id=emoji_id("back"))
+    ack_kb.adjust(1)
+    
+    await message.answer(
+        f"{E_CHECK} <b>Ваш ответ успешно передан Тайному Санте!</b>\n\n"
+        f"{E_MAGIC} Спасибо! Теперь ваш Санта сможет подобрать идеальный подарок.",
+        reply_markup=ack_kb.as_markup(),
+        parse_mode="HTML"
+    )

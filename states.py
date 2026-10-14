@@ -1,5 +1,11 @@
 from aiogram.fsm.state import State, StatesGroup
 
+class AnonymousChatSanta(StatesGroup):
+    entering_question = State()
+
+class AnonymousChatReceiver(StatesGroup):
+    entering_reply = State()
+
 class Registration(StatesGroup):
     choosing_gender = State()
     entering_display_name = State()

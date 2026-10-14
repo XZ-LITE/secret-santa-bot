@@ -78,6 +78,7 @@ class Database:
                 data.setdefault("next_key", 10000)
                 data.setdefault("reminders_sent", {})
                 data.setdefault("access_requests", {})
+                data.setdefault("anonymous_notes", [])
 
                 if not isinstance(data["participants"], list):
                     data["participants"] = []
@@ -89,6 +90,8 @@ class Database:
                     data["reminders_sent"] = {}
                 if not isinstance(data["access_requests"], dict):
                     data["access_requests"] = {}
+                if not isinstance(data["anonymous_notes"], list):
+                    data["anonymous_notes"] = []
                 
                 return data
         except FileNotFoundError:
@@ -100,6 +103,7 @@ class Database:
                 "next_key": 10000,
                 "reminders_sent": {},
                 "access_requests": {},
+                "anonymous_notes": [],
                 "settings": {
                     "total_participants": 20,
                     "registration_open": True
@@ -788,6 +792,70 @@ class Database:
         ]
         
         return remaining_givers, remaining_receivers
+
+    async def get_santa_for_user(self, receiver_id: int) -> Optional[int]:
+        """Возвращает Telegram ID Тайного Санты для указанного получателя"""
+        data = await self._read_db()
+        users = data.get("users", {})
+        receiver_id_int = int(receiver_id)
+        for giver_id, user_data in users.items():
+            if isinstance(user_data, dict) and user_data.get("gift_to_user_id") == receiver_id_int:
+                return int(giver_id)
+        return None
+
+    async def get_receiver_for_user(self, giver_id: int) -> Optional[int]:
+        """Возвращает Telegram ID получателя для указанного Санты"""
+        data = await self._read_db()
+        user_data = data.get("users", {}).get(str(giver_id))
+        if isinstance(user_data, dict):
+            rec = user_data.get("gift_to_user_id")
+            return int(rec) if rec is not None else None
+        return None
+
+    @serialize_mutations
+    async def save_anonymous_note(self, from_user_id: int, to_user_id: int, note_type: str, text: str) -> None:
+        """Сохраняет анонимную записку (вопрос или ответ) в историю"""
+        data = await self._read_db()
+        if "anonymous_notes" not in data or not isinstance(data["anonymous_notes"], list):
+            data["anonymous_notes"] = []
+        data["anonymous_notes"].append({
+            "from_user_id": int(from_user_id),
+            "to_user_id": int(to_user_id),
+            "type": note_type,
+            "text": text,
+            "timestamp": datetime.datetime.now().isoformat()
+        })
+        if len(data["anonymous_notes"]) > 500:
+            data["anonymous_notes"] = data["anonymous_notes"][-500:]
+        await self._write_db(data)
+
+    async def check_anonymous_rate_limit(self, from_user_id: int, limit: int = 5, window_seconds: int = 60) -> bool:
+        """Проверяет, не превысил ли пользователь лимит отправки записок (по умолчанию 5 в минуту)"""
+        data = await self._read_db()
+        notes = data.get("anonymous_notes", [])
+        if not isinstance(notes, list):
+            return True
+        now = datetime.datetime.now()
+        count = 0
+        from_id = int(from_user_id)
+        for note in reversed(notes):
+            if note.get("from_user_id") == from_id:
+                try:
+                    note_time = datetime.datetime.fromisoformat(note.get("timestamp", ""))
+                    if (now - note_time).total_seconds() <= window_seconds:
+                        count += 1
+                        if count >= limit:
+                            return False
+                    else:
+                        break
+                except Exception:
+                    pass
+        return True
+
+    async def get_anonymous_notes(self) -> List[Dict]:
+        """Возвращает историю анонимных записок"""
+        data = await self._read_db()
+        return data.get("anonymous_notes", [])
 
 # Глобальный экземпляр базы данных
 db = Database(DB_PATH)
