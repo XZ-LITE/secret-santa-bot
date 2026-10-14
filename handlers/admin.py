@@ -2,7 +2,6 @@ import os
 import html
 import datetime
 import asyncio
-import logging
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, FSInputFile
@@ -22,7 +21,6 @@ from states import (
     AdminEditDisplayName,
     AdminManualDistribution,
     AdminNotifySelected,
-    AdminResetUserChanges,
     AdminDirectMessage
 )
 from keyboards import (
@@ -41,16 +39,15 @@ from keyboards import (
 )
 from utils import (
     is_registration_open,
-    format_admin_user_info,
     format_admin_user_card,
     format_wish_links,
     send_message_safe
 )
 from custom_emojis import (
-    E_USER, E_USERS, E_GIFT, E_GIFT_STAR, E_GIFT_GIVE, E_CHECK, E_CROSS,
-    E_ERASE, E_TRASH, E_HOURGLASS, E_CALENDAR, E_CLOCK, E_MONEY, E_PARTY,
-    E_TAG, E_LOCK, E_EDIT, E_REPEAT, E_LINK, E_SPARKLES, E_STATS, E_WARNING,
-    E_QUESTION, E_BELL, E_MESSAGE, E_INFO, E_FILE, E_ARCHIVE, E_TARGET,
+    E_USER, E_USERS, E_GIFT, E_GIFT_STAR, E_CHECK, E_CROSS,
+    E_HOURGLASS, E_CALENDAR, E_CLOCK, E_MONEY, E_PARTY,
+    E_EDIT, E_LINK, E_SPARKLES, E_STATS, E_WARNING,
+    E_BELL, E_MESSAGE, E_INFO, E_FILE, E_ARCHIVE, E_TARGET,
     E_CROWN, E_DICE, E_PUZZLE, E_MEGAPHONE, E_BROADCAST, E_SETTINGS,
     E_ADD_USER, E_SEARCH, emoji_id
 )

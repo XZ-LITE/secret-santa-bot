@@ -5,16 +5,16 @@ import html
 import datetime
 import asyncio
 import logging
-from typing import Tuple, List, Optional
+from typing import Tuple, Optional
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from config import DB_PATH, GIFT_BUDGET
 
 from urllib.parse import urlparse
 from custom_emojis import (
-    E_USER, E_USERS, E_GIFT, E_GIFT_STAR, E_CHECK, E_CROSS, E_ERASE,
-    E_HOURGLASS, E_CALENDAR, E_CLOCK, E_MONEY, E_PARTY, E_TAG,
-    E_LOCK, E_EDIT, E_REPEAT, E_LINK, E_SPARKLES, E_STATS, E_WARNING,
+    E_USER, E_GIFT, E_GIFT_STAR, E_CHECK, E_CROSS,
+    E_HOURGLASS, E_MONEY, E_PARTY, E_TAG,
+    E_LOCK, E_EDIT, E_REPEAT, E_LINK, E_SPARKLES, E_STATS,
     E_QUESTION, E_FILE
 )
 
@@ -132,7 +132,7 @@ def format_admin_user_card(
     if wish_links and wish_links != "Нет ссылки":
         text += f"• <b>Ссылки:</b>\n{wish_links}\n"
     else:
-        text += f"• <b>Ссылки:</b> Нет ссылки\n"
+        text += "• <b>Ссылки:</b> Нет ссылки\n"
         
     text += (
         f"• <b>Лимиты правок:</b> Желание ({wish_changes}/3), Пол ({gender_changed})\n"
