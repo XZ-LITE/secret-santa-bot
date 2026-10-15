@@ -61,6 +61,8 @@ class Database:
                     data["settings"] = {}
                 data["settings"].setdefault("total_participants", 20)
                 data["settings"].setdefault("registration_open", True)
+                data["settings"].setdefault("moderation_enabled", True)
+                data["settings"].setdefault("reveal_done", False)
                 if not isinstance(data.get("allowed_users"), list):
                     data["allowed_users"] = INITIAL_ALLOWED_USERS.copy()
                 if not isinstance(data.get("users"), dict):
@@ -79,6 +81,7 @@ class Database:
                 data.setdefault("reminders_sent", {})
                 data.setdefault("access_requests", {})
                 data.setdefault("anonymous_notes", [])
+                data.setdefault("pending_notes", {})
 
                 if not isinstance(data["participants"], list):
                     data["participants"] = []
@@ -92,6 +95,8 @@ class Database:
                     data["access_requests"] = {}
                 if not isinstance(data["anonymous_notes"], list):
                     data["anonymous_notes"] = []
+                if not isinstance(data["pending_notes"], dict):
+                    data["pending_notes"] = {}
                 
                 return data
         except FileNotFoundError:
@@ -104,9 +109,12 @@ class Database:
                 "reminders_sent": {},
                 "access_requests": {},
                 "anonymous_notes": [],
+                "pending_notes": {},
                 "settings": {
                     "total_participants": 20,
-                    "registration_open": True
+                    "registration_open": True,
+                    "moderation_enabled": True,
+                    "reveal_done": False
                 },
                 "allowed_users": INITIAL_ALLOWED_USERS.copy()
             }
@@ -650,6 +658,8 @@ class Database:
         
         data["auto_distribution_done"] = False
         data["manual_distributions"] = []
+        data.setdefault("settings", {})["reveal_done"] = False
+        data["pending_notes"] = {}
         
         for user_id in data["users"]:
             data["users"][user_id]["gift_to_user_id"] = None
@@ -856,6 +866,96 @@ class Database:
         """Возвращает историю анонимных записок"""
         data = await self._read_db()
         return data.get("anonymous_notes", [])
+
+    async def is_moderation_enabled(self) -> bool:
+        """Проверяет, включена ли премодерация записок админом"""
+        data = await self._read_db()
+        return data.get("settings", {}).get("moderation_enabled", True)
+
+    @serialize_mutations
+    async def toggle_moderation(self) -> bool:
+        """Переключает статус премодерации записок (ВКЛ / ВЫКЛ)"""
+        data = await self._read_db()
+        current = data.get("settings", {}).get("moderation_enabled", True)
+        data.setdefault("settings", {})["moderation_enabled"] = not current
+        await self._write_db(data)
+        return not current
+
+    async def is_reveal_done(self) -> bool:
+        """Проверяет, было ли выполнено финальное раскрытие Санты"""
+        data = await self._read_db()
+        return data.get("settings", {}).get("reveal_done", False)
+
+    @serialize_mutations
+    async def set_reveal_done(self, done: bool = True) -> None:
+        """Устанавливает статус финального раскрытия Санты"""
+        data = await self._read_db()
+        data.setdefault("settings", {})["reveal_done"] = done
+        await self._write_db(data)
+
+    @serialize_mutations
+    async def save_pending_note(
+        self,
+        note_id: str,
+        sender_id: int,
+        target_id: int,
+        note_type: str,
+        text: str,
+        sender_role: str = "santa"
+    ) -> None:
+        """Сохраняет записку в очередь премодерации"""
+        data = await self._read_db()
+        if "pending_notes" not in data or not isinstance(data["pending_notes"], dict):
+            data["pending_notes"] = {}
+        data["pending_notes"][note_id] = {
+            "note_id": note_id,
+            "sender_id": int(sender_id),
+            "target_id": int(target_id),
+            "note_type": note_type,
+            "sender_role": sender_role,
+            "text": text,
+            "created_at": datetime.datetime.now().isoformat()
+        }
+        await self._write_db(data)
+
+    async def get_pending_note(self, note_id: str) -> Optional[Dict]:
+        """Получает записку из очереди модерации без удаления"""
+        data = await self._read_db()
+        return data.get("pending_notes", {}).get(note_id)
+
+    @serialize_mutations
+    async def pop_pending_note(self, note_id: str) -> Optional[Dict]:
+        """Извлекает и удаляет записку из очереди модерации"""
+        data = await self._read_db()
+        pending = data.get("pending_notes", {})
+        if note_id in pending:
+            note = pending.pop(note_id)
+            await self._write_db(data)
+            return note
+        return None
+
+    async def get_distribution_pairs(self) -> List[Dict]:
+        """Возвращает список пар распределения (даритель -> получатель) с полной информацией"""
+        data = await self._read_db()
+        users = data.get("users", {})
+        pairs = []
+        for giver_id_str, giver_data in users.items():
+            if not isinstance(giver_data, dict):
+                continue
+            receiver_id = giver_data.get("gift_to_user_id")
+            if not receiver_id:
+                continue
+            receiver_data = users.get(str(receiver_id), {})
+            pairs.append({
+                "giver_id": int(giver_id_str),
+                "giver_name": giver_data.get("display_name") or giver_data.get("username", f"ID {giver_id_str}"),
+                "giver_key": giver_data.get("key"),
+                "receiver_id": int(receiver_id),
+                "receiver_name": receiver_data.get("display_name") or receiver_data.get("username", f"ID {receiver_id}"),
+                "receiver_key": receiver_data.get("key"),
+                "receiver_wish": receiver_data.get("wish", "Не указано"),
+            })
+        return pairs
 
 # Глобальный экземпляр базы данных
 db = Database(DB_PATH)

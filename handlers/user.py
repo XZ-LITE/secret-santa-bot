@@ -1,5 +1,6 @@
 import re
 import html
+import uuid
 import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
@@ -26,7 +27,8 @@ from utils import (
     format_wish_links,
     validate_wish_link,
     send_message_safe,
-    generate_progress_bar
+    generate_progress_bar,
+    check_deanonymization_text
 )
 from custom_emojis import (
     E_USER, E_USERS, E_GIFT, E_GIFT_STAR, E_CHECK, E_CROSS,
@@ -244,7 +246,8 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
         f"{E_GIFT} <b>Ваша анкета Тайного Санты:</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"{E_USER} <b>Имя:</b> {display_name_safe}\n"
-        f"{E_TAG} <b>Секретный ключ:</b> <code>#{user_data['key']}</code>\n"
+        f"{E_TAG} <b>Секретный код подарка:</b> <code>#{user_data['key']}</code>\n"
+        f"<i>(Подарок с этим кодом будет ждать вас под ёлкой!)</i>\n"
         f"• <b>Пол:</b> {gender_str}\n\n"
         f"{E_GIFT} <b>Ваше желание:</b>\n"
         f"«{wish_safe}»\n\n"
@@ -266,15 +269,14 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
         f"━━━━━━━━━━━━━━━━━━━━\n"
     )
     
-    if user_data.get('gift_to_gender'):
-        gender = user_data['gift_to_gender']
-        gender_text = f"парню {E_USER}" if gender == "male" else f"девушке {E_USER}"
+    if user_data.get('gift_to_user_id'):
         receiver_id = user_data.get('gift_to_user_id')
         receiver_data = await db.get_user(receiver_id) if receiver_id else None
+        receiver_key = receiver_data.get('key', '---') if receiver_data else '---'
         
         text += (
             f"{E_GIFT_STAR} <b>ВАШ ПОДОПЕЧНЫЙ:</b>\n"
-            f"• Вы дарите подарок: <b>{gender_text}</b>\n"
+            f"• <b>Код подарка:</b> <code>#{receiver_key}</code>\n"
         )
         if receiver_data:
             rec_wish = html.escape(receiver_data.get('wish', 'не указано'), quote=False)
@@ -298,7 +300,7 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
         text += f"{E_HOURGLASS} <b>Статус:</b> ждём регистрации всех участников ({count}/{total_participants})\n   {progress}"
     
     keyboard = InlineKeyboardBuilder()
-    if not user_data.get('gift_to_gender'):
+    if not user_data.get('gift_to_user_id'):
         keyboard.button(text="Изменить желание", callback_data="change_wish_menu", icon_custom_emoji_id=emoji_id("edit"))
         keyboard.button(text="Изменить пол", callback_data="change_gender_menu", icon_custom_emoji_id=emoji_id("repeat"))
     else:
@@ -604,7 +606,7 @@ async def change_wish_menu(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Вы уже использовали все 3 изменения желания", show_alert=True)
         return
     
-    if user_data.get('gift_to_gender'):
+    if user_data.get('gift_to_user_id'):
         await callback.answer("❌ Нельзя менять желание после распределения", show_alert=True)
         return
     
@@ -742,7 +744,7 @@ async def change_gender_menu(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Вы уже использовали смену пола", show_alert=True)
         return
     
-    if user_data.get('gift_to_gender'):
+    if user_data.get('gift_to_user_id'):
         await callback.answer("❌ Нельзя менять пол после распределения", show_alert=True)
         return
     
@@ -902,6 +904,65 @@ async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
     
     escaped_question = html.escape(question_text, quote=False)
     
+    # 1. Проверка автофильтром стоп-слов деанонимизации
+    deanonym_issue = check_deanonymization_text(question_text)
+    if deanonym_issue:
+        await message.answer(
+            f"{E_WARNING} <b>Вопрос отклонён фильтром безопасности:</b>\n{deanonym_issue}.\n\n"
+            f"<i>В игре «Тайный Санта» запрещено спрашивать или раскрывать имена, контакты, пол или номера. "
+            f"Задавайте вопросы только о пожеланиях к подарку (размер, цвет, хобби, аллергия).</i>",
+            parse_mode="HTML"
+        )
+        return
+    
+    # 2. Проверка включения премодерации
+    if await db.is_moderation_enabled():
+        note_id = uuid.uuid4().hex[:10]
+        await db.save_pending_note(
+            note_id=note_id,
+            sender_id=message.from_user.id,
+            target_id=receiver_id,
+            note_type="question",
+            text=question_text,
+            sender_role="santa"
+        )
+        await state.clear()
+        
+        santa_kb = InlineKeyboardBuilder()
+        santa_kb.button(text="Моя анкета", callback_data="myinfo", icon_custom_emoji_id=emoji_id("gift"))
+        santa_kb.button(text="В главное меню", callback_data="back_to_main", icon_custom_emoji_id=emoji_id("back"))
+        santa_kb.adjust(1)
+        
+        await message.answer(
+            f"{E_HOURGLASS} <b>Ваша записка отправлена организаторам на проверку!</b>\n\n"
+            f"Как только администратор подтвердит её, она будет моментально доставлена вашему подопечному.",
+            reply_markup=santa_kb.as_markup(),
+            parse_mode="HTML"
+        )
+        
+        sender_data = await db.get_user(message.from_user.id)
+        sender_name = html.escape(sender_data.get('display_name') or message.from_user.first_name, quote=False) if sender_data else message.from_user.first_name
+        receiver_data = await db.get_user(receiver_id)
+        receiver_name = html.escape(receiver_data.get('display_name') or f"ID {receiver_id}", quote=False) if receiver_data else f"ID {receiver_id}"
+        receiver_key = receiver_data.get('key', '---') if receiver_data else '---'
+        
+        admin_text = (
+            f"{E_BELL} <b>Новая записка на модерации! (Вопрос Санты)</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"• <b>Санта:</b> {sender_name} (<code>ID: {message.from_user.id}</code>)\n"
+            f"• <b>Подопечный:</b> {receiver_name} (Код: <code>#{receiver_key}</code>)\n\n"
+            f"{E_MESSAGE} <b>Текст вопроса:</b>\n«{escaped_question}»\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+        admin_kb = InlineKeyboardBuilder()
+        admin_kb.button(text="Одобрить", callback_data=f"mod_appr_{note_id}", icon_custom_emoji_id=emoji_id("check"))
+        admin_kb.button(text="Отклонить", callback_data=f"mod_rejl_{note_id}", icon_custom_emoji_id=emoji_id("cross"))
+        admin_kb.adjust(2)
+        
+        for admin_id in ADMIN_IDS:
+            await send_message_safe(bot, admin_id, admin_text, reply_markup=admin_kb.as_markup(), parse_mode="HTML")
+        return
+    
     receiver_text = (
         f"{E_GIFT} <b>Вам пришла анонимная записка от вашего Тайного Санты!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1036,6 +1097,65 @@ async def process_receiver_reply(message: Message, state: FSMContext, bot: Bot):
         return
     
     escaped_reply = html.escape(reply_text, quote=False)
+    
+    # 1. Проверка автофильтром стоп-слов деанонимизации
+    deanonym_issue = check_deanonymization_text(reply_text)
+    if deanonym_issue:
+        await message.answer(
+            f"{E_WARNING} <b>Ответ отклонён фильтром безопасности:</b>\n{deanonym_issue}.\n\n"
+            f"<i>В игре «Тайный Санта» запрещено спрашивать или раскрывать имена, контакты, пол или номера. "
+            f"Отвечайте только на вопрос о подарке.</i>",
+            parse_mode="HTML"
+        )
+        return
+
+    # 2. Проверка включения премодерации
+    if await db.is_moderation_enabled():
+        note_id = uuid.uuid4().hex[:10]
+        await db.save_pending_note(
+            note_id=note_id,
+            sender_id=message.from_user.id,
+            target_id=santa_id,
+            note_type="reply",
+            text=reply_text,
+            sender_role="receiver"
+        )
+        await state.clear()
+        
+        ack_kb = InlineKeyboardBuilder()
+        ack_kb.button(text="Моя анкета", callback_data="myinfo", icon_custom_emoji_id=emoji_id("gift"))
+        ack_kb.button(text="В главное меню", callback_data="back_to_main", icon_custom_emoji_id=emoji_id("back"))
+        ack_kb.adjust(1)
+        
+        await message.answer(
+            f"{E_HOURGLASS} <b>Ваш ответ отправлен организаторам на проверку!</b>\n\n"
+            f"Как только администратор подтвердит его, он будет моментально доставлен вашему Тайному Санте.",
+            reply_markup=ack_kb.as_markup(),
+            parse_mode="HTML"
+        )
+        
+        sender_data = await db.get_user(message.from_user.id)
+        sender_name = html.escape(sender_data.get('display_name') or message.from_user.first_name, quote=False) if sender_data else message.from_user.first_name
+        sender_key = sender_data.get('key', '---') if sender_data else '---'
+        santa_data = await db.get_user(santa_id)
+        santa_name = html.escape(santa_data.get('display_name') or f"ID {santa_id}", quote=False) if santa_data else f"ID {santa_id}"
+        
+        admin_text = (
+            f"{E_BELL} <b>Новая записка на модерации! (Ответ подопечного)</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"• <b>Подопечный:</b> {sender_name} (Код: <code>#{sender_key}</code>)\n"
+            f"• <b>Санта:</b> {santa_name} (<code>ID: {santa_id}</code>)\n\n"
+            f"{E_MESSAGE} <b>Текст ответа:</b>\n«{escaped_reply}»\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+        admin_kb = InlineKeyboardBuilder()
+        admin_kb.button(text="Одобрить", callback_data=f"mod_appr_{note_id}", icon_custom_emoji_id=emoji_id("check"))
+        admin_kb.button(text="Отклонить", callback_data=f"mod_rejl_{note_id}", icon_custom_emoji_id=emoji_id("cross"))
+        admin_kb.adjust(2)
+        
+        for admin_id in ADMIN_IDS:
+            await send_message_safe(bot, admin_id, admin_text, reply_markup=admin_kb.as_markup(), parse_mode="HTML")
+        return
     
     santa_text = (
         f"{E_MESSAGE} <b>Ответ от вашего подопечного!</b>\n"

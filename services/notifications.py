@@ -3,12 +3,13 @@ import asyncio
 import logging
 import html
 from aiogram import Bot
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import ADMIN_IDS, GIFT_BUDGET
 from utils import format_wish_links, send_message_safe
 from database import Database
 from custom_emojis import (
     E_CLOCK, E_BELL, E_GIFT, E_GIFT_STAR, E_PARTY, E_SPARKLES,
-    E_MONEY, E_STATS, E_CROWN, E_LINK, E_USER
+    E_MONEY, E_STATS, E_CROWN, E_LINK, E_USER, emoji_id
 )
 
 async def send_registration_reminders(bot: Bot, db: Database) -> int:
@@ -92,24 +93,23 @@ async def notify_all_participants(bot: Bot, db: Database):
     for user_id_str, user_data in users.items():
         user_id = int(user_id_str)
         gift_to_id = user_data.get('gift_to_user_id')
-        gift_to_gender = user_data.get('gift_to_gender')
         
-        if not gift_to_id or not gift_to_gender:
+        if not gift_to_id:
             continue
         
         receiver_data = await db.get_user(gift_to_id)
         if not receiver_data:
             continue
         
-        gender_text = f"<b>мужчине</b> {E_USER}" if gift_to_gender == "male" else f"<b>женщине</b> {E_USER}"
         receiver_wish = html.escape(receiver_data.get('wish', 'не указано'), quote=False)
         receiver_links = format_wish_links(receiver_data.get('wish_link', ''))
+        receiver_key = receiver_data.get('key', '---')
         
         message = (
             f"{E_GIFT} <b>Внимание! Все участники зарегистрировались!</b>\n\n"
             f"Распределение Тайного Санты завершено! {E_PARTY}{E_SPARKLES}\n\n"
-            f"Вы дарите подарок: {gender_text}\n"
-            f"Желание получателя: <i>«{receiver_wish}»</i>\n"
+            f"• <b>Код подарка:</b> <code>#{receiver_key}</code>\n"
+            f"• Желание получателя: <i>«{receiver_wish}»</i>\n"
         )
         
         if receiver_links and receiver_links != "Нет ссылки":
@@ -122,10 +122,15 @@ async def notify_all_participants(bot: Bot, db: Database):
                 message += f"\n{E_LINK} <b>Ссылка на подарок:</b> {receiver_links}\n"
         
         message += f"\n{E_MONEY} <b>Бюджет:</b> до {GIFT_BUDGET} рублей\n"
-        message += "Не забудьте про творческий подход и новогоднее настроение!\n"
+        message += "Не забудьте подписать подарок этим кодом при вручении!\n"
         message += f"С наступающим Новым Годом! {E_PARTY}{E_SPARKLES}"
         
-        success, err = await send_message_safe(bot, user_id, message, parse_mode="HTML")
+        notif_kb = InlineKeyboardBuilder()
+        notif_kb.button(text="Спросить подопечного анонимно", callback_data="ask_receiver", icon_custom_emoji_id=emoji_id("new_message"))
+        notif_kb.button(text="Моя анкета", callback_data="myinfo", icon_custom_emoji_id=emoji_id("gift"))
+        notif_kb.adjust(1)
+        
+        success, err = await send_message_safe(bot, user_id, message, reply_markup=notif_kb.as_markup(), parse_mode="HTML")
         if not success:
             logging.warning("Не удалось отправить сообщение пользователю %s: %s", user_id, err)
         await asyncio.sleep(0.05)

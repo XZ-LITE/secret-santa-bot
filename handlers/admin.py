@@ -908,16 +908,27 @@ async def admin_settings(callback: CallbackQuery, state: FSMContext):
     current_count = await db.get_total_participants()
     deadline = await db.get_registration_deadline()
     allowed_users = await db.get_allowed_users()
+    is_mod = await db.is_moderation_enabled()
+    mod_status_text = "Включена" if is_mod else "Выключена"
     
     text = (
         f"{E_SETTINGS} <b>Настройки</b>\n\n"
         f"{E_TARGET} Текущее количество участников: <b>{current_count}</b>\n"
         f"{E_USERS} Пользователей в списке доступа: <b>{len(allowed_users)}</b>\n"
         f"{E_CLOCK} Регистрация открыта до: <b>{deadline.strftime('%d.%m.%Y %H:%M')}</b>\n"
-        f"{E_MONEY} Бюджет подарка: <b>{GIFT_BUDGET} рублей</b>"
+        f"{E_MONEY} Бюджет подарка: <b>{GIFT_BUDGET} рублей</b>\n"
+        f"• Премодерация записок: <b>{mod_status_text}</b>"
     )
-    await callback.message.edit_text(text, reply_markup=get_admin_settings_keyboard(), parse_mode="HTML")
+    await callback.message.edit_text(text, reply_markup=get_admin_settings_keyboard(moderation_enabled=is_mod), parse_mode="HTML")
     await callback.answer()
+
+@admin_router.callback_query(F.data == "admin_toggle_moderation")
+async def admin_toggle_moderation_handler(callback: CallbackQuery, state: FSMContext):
+    """Переключение премодерации записок"""
+    new_val = await db.toggle_moderation()
+    status_str = "ВКЛЮЧЕНА ✅" if new_val else "ВЫКЛЮЧЕНА ❌"
+    await callback.answer(f"Премодерация записок {status_str}", show_alert=True)
+    await admin_settings(callback, state)
 
 @admin_router.callback_query(F.data == "admin_set_deadline")
 async def admin_set_deadline_menu(callback: CallbackQuery, state: FSMContext):
@@ -985,13 +996,18 @@ async def admin_distribution_menu(callback: CallbackQuery, state: FSMContext):
     distribution_status = await db.get_distribution_status()
     count = await db.get_participants_count()
     total_participants = await db.get_total_participants()
+    is_distributed = await db.is_distribution_done()
+    is_revealed = await db.is_reveal_done()
+    
+    reveal_status_str = "Да ✅" if is_revealed else "Ожидает финала ⏳"
     text = (
         f"{E_DICE} <b>Управление распределением</b>\n\n"
         f"{E_USERS} Зарегистрировано: <b>{count}/{total_participants}</b> участников\n"
-        f"{E_GIFT} Статус: <i>{distribution_status}</i>\n\n"
+        f"{E_GIFT} Статус: <i>{distribution_status}</i>\n"
+        f"• Финал игры (раскрытие): <b>{reveal_status_str}</b>\n\n"
         f"Выберите действие:"
     )
-    await callback.message.edit_text(text, reply_markup=get_admin_distribution_keyboard(), parse_mode="HTML")
+    await callback.message.edit_text(text, reply_markup=get_admin_distribution_keyboard(is_distributed=is_distributed, is_revealed=is_revealed), parse_mode="HTML")
     await callback.answer()
 
 @admin_router.callback_query(F.data == "admin_distribute_confirm")
@@ -1243,20 +1259,25 @@ async def admin_manual_distribute_select_receiver(callback: CallbackQuery, state
         
         # Отправляем уведомление дарителю (если еще не все распределены, иначе notify_all_participants уже уведомил всех)
         if not await db.is_distribution_done():
-            receiver_wish = receiver_data.get('wish', 'не указано')
+            receiver_wish = html.escape(receiver_data.get('wish', 'не указано'), quote=False)
             receiver_links = format_wish_links(receiver_data.get('wish_link', ''))
-            receiver_gender = "мужчине" if receiver_data.get('gender') == 'male' else "женщине"
+            receiver_key = receiver_data.get('key', '---')
             
             message = (
                 f"{E_GIFT_STAR} <b>Ручное распределение Тайного Санты!</b>\n\n"
-                f"Вы дарите подарок: <b>{receiver_gender}</b>\n"
-                f"Желание получателя: <i>{receiver_wish}</i>\n"
+                f"• <b>Код подарка:</b> <code>#{receiver_key}</code>\n"
+                f"• Желание получателя: <i>«{receiver_wish}»</i>\n"
             )
             if receiver_links and receiver_links != "Нет ссылки":
                 message += f"\n{E_LINK} Ссылки на подарки:\n{receiver_links}\n"
             message += f"\n{E_MONEY} Бюджет: до <b>{GIFT_BUDGET} рублей</b>\n{E_SPARKLES} С наступающим Новым Годом!"
             
-            await send_message_safe(bot, giver_id, message, parse_mode="HTML")
+            notif_kb = InlineKeyboardBuilder()
+            notif_kb.button(text="Спросить подопечного анонимно", callback_data="ask_receiver", icon_custom_emoji_id=emoji_id("new_message"))
+            notif_kb.button(text="Моя анкета", callback_data="myinfo", icon_custom_emoji_id=emoji_id("gift"))
+            notif_kb.adjust(1)
+            
+            await send_message_safe(bot, giver_id, message, reply_markup=notif_kb.as_markup(), parse_mode="HTML")
     else:
         await callback.message.edit_text(f"{E_CROSS} Ошибка ручного распределения", reply_markup=get_admin_keyboard(), parse_mode="HTML")
     
@@ -1517,6 +1538,242 @@ async def admin_remind(callback: CallbackQuery, bot: Bot):
     await callback.message.edit_text(
         f"{E_CHECK} <b>Напоминания отправлены!</b>\nОтправлено: <b>{reminders_sent}/{len(unregistered)}</b>",
         reply_markup=get_admin_broadcasts_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+# -------------------------------------------------------------
+# Премодерация анонимных записок администраторами
+# -------------------------------------------------------------
+
+@admin_router.callback_query(F.data.startswith("mod_appr_"))
+async def admin_approve_note(callback: CallbackQuery, bot: Bot):
+    """Одобрение анонимной записки администратором"""
+    note_id = callback.data.replace("mod_appr_", "")
+    note = await db.pop_pending_note(note_id)
+    
+    if not note:
+        await callback.answer("⚠️ Эта записка уже была обработана другим администратором.", show_alert=True)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        return
+    
+    sender_id = note["sender_id"]
+    target_id = note["target_id"]
+    note_type = note["note_type"]
+    text_content = note["text"]
+    escaped_text = html.escape(text_content, quote=False)
+    
+    admin_uname = callback.from_user.username
+    admin_signature = f"@{admin_uname}" if admin_uname else callback.from_user.first_name
+    
+    if note_type == "question":
+        receiver_text = (
+            f"{E_GIFT} <b>Вам пришла анонимная записка от вашего Тайного Санты!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"«{escaped_text}»\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{E_SPARKLES} <i>Вы можете ответить Санте анонимно, нажав кнопку ниже:</i>"
+        )
+        receiver_kb = InlineKeyboardBuilder()
+        receiver_kb.button(
+            text="Ответить Санте",
+            callback_data=f"reply_santa_{sender_id}",
+            icon_custom_emoji_id=emoji_id("new_message")
+        )
+        receiver_kb.adjust(1)
+        
+        success, _ = await send_message_safe(bot, target_id, receiver_text, reply_markup=receiver_kb.as_markup(), parse_mode="HTML")
+        if success:
+            await send_message_safe(
+                bot, sender_id,
+                f"{E_CHECK} <b>Ваша записка проверена администратором и доставлена подопечному!</b>\n\n"
+                f"{E_HOURGLASS} Как только он ответит, вам придёт уведомление.",
+                parse_mode="HTML"
+            )
+        else:
+            await send_message_safe(
+                bot, sender_id,
+                f"{E_WARNING} Записка была одобрена, но её не удалось доставить подопечному (возможно, пользователь заблокировал бота).",
+                parse_mode="HTML"
+            )
+    else:
+        santa_text = (
+            f"{E_MESSAGE} <b>Ответ от вашего подопечного!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"«{escaped_text}»\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{E_SPARKLES} <i>Если хотите уточнить ещё что-то, вы можете задать новый вопрос:</i>"
+        )
+        santa_kb = InlineKeyboardBuilder()
+        santa_kb.button(
+            text="Задать ещё вопрос",
+            callback_data="ask_receiver",
+            icon_custom_emoji_id=emoji_id("new_message")
+        )
+        santa_kb.button(
+            text="Моя анкета",
+            callback_data="myinfo",
+            icon_custom_emoji_id=emoji_id("gift")
+        )
+        santa_kb.adjust(1)
+        
+        success, _ = await send_message_safe(bot, target_id, santa_text, reply_markup=santa_kb.as_markup(), parse_mode="HTML")
+        if success:
+            await send_message_safe(
+                bot, sender_id,
+                f"{E_CHECK} <b>Ваш ответ проверен администратором и доставлен вашему Тайному Санте!</b>",
+                parse_mode="HTML"
+            )
+        else:
+            await send_message_safe(
+                bot, sender_id,
+                f"{E_WARNING} Ответ был одобрен, но Санта временно недоступен.",
+                parse_mode="HTML"
+            )
+            
+    await db.save_anonymous_note(
+        from_user_id=sender_id,
+        to_user_id=target_id,
+        note_type=note_type,
+        text=text_content
+    )
+    
+    try:
+        new_text = callback.message.html_text + f"\n\n{E_CHECK} <b>Одобрено администратором {admin_signature}</b>"
+        await callback.message.edit_text(new_text, reply_markup=None, parse_mode="HTML")
+    except Exception:
+        pass
+    await callback.answer("Записка успешно одобрена и доставлена!")
+
+@admin_router.callback_query(F.data.startswith("mod_rejl_"))
+async def admin_reject_note(callback: CallbackQuery, bot: Bot):
+    """Отклонение анонимной записки администратором"""
+    note_id = callback.data.replace("mod_rejl_", "")
+    note = await db.pop_pending_note(note_id)
+    
+    if not note:
+        await callback.answer("⚠️ Эта записка уже была обработана.", show_alert=True)
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        return
+    
+    sender_id = note["sender_id"]
+    admin_uname = callback.from_user.username
+    admin_signature = f"@{admin_uname}" if admin_uname else callback.from_user.first_name
+    
+    await send_message_safe(
+        bot, sender_id,
+        f"{E_CROSS} <b>Ваша записка была отклонена администратором.</b>\n\n"
+        f"<i>Причина: вопрос нарушает правила анонимности или содержит некорректный текст. "
+        f"Пожалуйста, задавайте вопросы только о пожеланиях к подарку (размер, цвет, хобби, аллергия).</i>",
+        parse_mode="HTML"
+    )
+    
+    try:
+        new_text = callback.message.html_text + f"\n\n{E_CROSS} <b>Отклонено администратором {admin_signature}</b>"
+        await callback.message.edit_text(new_text, reply_markup=None, parse_mode="HTML")
+    except Exception:
+        pass
+    await callback.answer("Записка отклонена.")
+
+# -------------------------------------------------------------
+# Финал игры — «Раскрытие тайны Санты» (Grand Reveal)
+# -------------------------------------------------------------
+
+@admin_router.callback_query(F.data == "admin_reveal_confirm")
+async def admin_reveal_confirm(callback: CallbackQuery):
+    """Подтверждение финального раскрытия тайн Санты"""
+    if not await db.is_distribution_done():
+        await callback.answer("Распределение ещё не проведено!", show_alert=True)
+        return
+    
+    if await db.is_reveal_done():
+        await callback.answer("Тайна Санты уже была раскрыта ранее!", show_alert=True)
+        return
+    
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Да, раскрыть тайну всем!", callback_data="admin_reveal_do", icon_custom_emoji_id=emoji_id("party"))
+    keyboard.button(text="Отмена", callback_data="admin_distribution_menu", icon_custom_emoji_id=emoji_id("back"))
+    keyboard.adjust(1)
+    
+    text = (
+        f"{E_PARTY} <b>Финал игры: Раскрытие тайн Санты</b>\n\n"
+        f"{E_WARNING} <b>Внимание!</b> Это действие завершает интригу игры.\n\n"
+        f"Каждый участник получит персональное праздничное сообщение:\n"
+        f"• Кто был его Тайным Сантой (имя и фамилия)\n"
+        f"• Кому он дарил подарок (имя и фамилия)\n\n"
+        f"Вы уверены, что подарки уже вручены и пора раскрыть карты?"
+    )
+    await callback.message.edit_text(text, reply_markup=keyboard.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+@admin_router.callback_query(F.data == "admin_reveal_do")
+async def admin_reveal_do(callback: CallbackQuery, bot: Bot):
+    """Выполнение рассылки раскрытия тайн Санты"""
+    if await db.is_reveal_done():
+        await callback.answer("Тайна уже раскрыта!", show_alert=True)
+        return
+    
+    await db.set_reveal_done(True)
+    pairs = await db.get_distribution_pairs()
+    
+    santa_map = {}
+    receiver_map = {}
+    all_users = set()
+    
+    for p in pairs:
+        giver_id = p["giver_id"]
+        receiver_id = p["receiver_id"]
+        all_users.add(giver_id)
+        all_users.add(receiver_id)
+        santa_map[receiver_id] = p["giver_name"]
+        receiver_map[giver_id] = (p["receiver_name"], p["receiver_key"])
+    
+    success_count = 0
+    fail_count = 0
+    
+    for uid in all_users:
+        santa_name = santa_map.get(uid, "Таинственный Санта")
+        receiver_info = receiver_map.get(uid)
+        if receiver_info:
+            receiver_name, receiver_key = receiver_info
+            rec_text = f"• А вы дарили подарок для: <b>{receiver_name}</b> (Код: <code>#{receiver_key}</code>)\n"
+        else:
+            rec_text = ""
+        
+        reveal_msg = (
+            f"{E_PARTY} <b>ТАЙНА САНТЫ РАСКРЫТА!</b> {E_SPARKLES}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{E_GIFT} <b>Вашим Тайным Сантой был(а):</b>\n"
+            f"👉 <b>{santa_name}</b>! 👈\n\n"
+            f"{rec_text}"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Надеемся, подарки принесли вам море радости и новогоднего настроения! {E_PARTY}\n"
+            f"Счастливого Нового Года! {E_SPARKLES}"
+        )
+        
+        ok, _ = await send_message_safe(bot, uid, reveal_msg, parse_mode="HTML")
+        if ok:
+            success_count += 1
+        else:
+            fail_count += 1
+        await asyncio.sleep(0.05)
+    
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="В админ-панель", callback_data="admin_panel", icon_custom_emoji_id=emoji_id("back"))
+    keyboard.adjust(1)
+    
+    await callback.message.edit_text(
+        f"{E_CHECK} <b>Тайна Санты успешно раскрыта!</b>\n\n"
+        f"• Успешно уведомлено: <b>{success_count}</b> участников\n"
+        f"• Не доставлено: <b>{fail_count}</b>\n\n"
+        f"Игра «Тайный Санта» успешно завершена! {E_PARTY}{E_SPARKLES}",
+        reply_markup=keyboard.as_markup(),
         parse_mode="HTML"
     )
     await callback.answer()

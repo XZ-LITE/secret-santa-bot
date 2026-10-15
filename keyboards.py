@@ -51,10 +51,16 @@ def get_admin_keyboard():
     keyboard.adjust(2, 2, 2, 2)
     return keyboard.as_markup()
 
-def get_admin_distribution_keyboard():
+def get_admin_distribution_keyboard(is_distributed: bool = False, is_revealed: bool = False):
     keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Распределить автоматически", callback_data="admin_distribute_confirm", icon_custom_emoji_id=emoji_id("sparkles"))
-    keyboard.button(text="Ручное распределение", callback_data="admin_manual_distribute", icon_custom_emoji_id=emoji_id("puzzle"))
+    if not is_distributed:
+        keyboard.button(text="Распределить автоматически", callback_data="admin_distribute_confirm", icon_custom_emoji_id=emoji_id("sparkles"))
+        keyboard.button(text="Ручное распределение", callback_data="admin_manual_distribute", icon_custom_emoji_id=emoji_id("puzzle"))
+    else:
+        if not is_revealed:
+            keyboard.button(text="Раскрыть тайну Санты (Финал)", callback_data="admin_reveal_confirm", icon_custom_emoji_id=emoji_id("party"))
+        else:
+            keyboard.button(text="Тайна Санты раскрыта", callback_data="admin_noop", icon_custom_emoji_id=emoji_id("check"))
     keyboard.button(text="Статус распределения", callback_data="admin_distribution_status", icon_custom_emoji_id=emoji_id("stats"))
     keyboard.button(text="Сбросить распределение", callback_data="admin_reset_distribution", icon_custom_emoji_id=emoji_id("repeat"))
     keyboard.button(text="Назад в админ-панель", callback_data="admin_panel", icon_custom_emoji_id=emoji_id("back"))
@@ -169,8 +175,11 @@ def get_admin_user_del_confirm_keyboard(user_id: int | str):
     keyboard.adjust(1)
     return keyboard.as_markup()
 
-def get_admin_settings_keyboard():
+def get_admin_settings_keyboard(moderation_enabled: bool = True):
     keyboard = InlineKeyboardBuilder()
+    mod_text = "Премодерация записок: ВКЛ" if moderation_enabled else "Премодерация записок: ВЫКЛ"
+    mod_icon = emoji_id("lock") if moderation_enabled else emoji_id("unlock")
+    keyboard.button(text=mod_text, callback_data="admin_toggle_moderation", icon_custom_emoji_id=mod_icon)
     keyboard.button(text="Изменить количество участников", callback_data="admin_set_participants", icon_custom_emoji_id=emoji_id("target"))
     keyboard.button(text="Изменить дедлайн регистрации", callback_data="admin_set_deadline", icon_custom_emoji_id=emoji_id("calendar"))
     keyboard.button(text="Назад", callback_data="admin_panel", icon_custom_emoji_id=emoji_id("back"))
