@@ -8,8 +8,8 @@ from config import ADMIN_IDS, GIFT_BUDGET
 from utils import format_wish_links, format_recipient_info_for_santa, send_message_safe
 from database import Database
 from custom_emojis import (
-    E_CLOCK, E_BELL, E_GIFT, E_GIFT_STAR, E_PARTY, E_SPARKLES,
-    E_MONEY, E_STATS, E_CROWN, E_LINK, E_USER, emoji_id
+    E_CLOCK, E_BELL, E_GIFT, E_PARTY, E_SPARKLES,
+    E_MONEY, E_STATS, E_CROWN, E_LINK, emoji_id
 )
 
 async def send_registration_reminders(bot: Bot, db: Database) -> int:

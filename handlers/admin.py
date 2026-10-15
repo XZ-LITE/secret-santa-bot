@@ -51,7 +51,7 @@ from custom_emojis import (
     E_EDIT, E_LINK, E_SPARKLES, E_STATS, E_WARNING,
     E_BELL, E_MESSAGE, E_INFO, E_FILE, E_ARCHIVE, E_TARGET,
     E_CROWN, E_DICE, E_PUZZLE, E_MEGAPHONE, E_BROADCAST, E_SETTINGS,
-    E_ADD_USER, E_SEARCH, emoji_id
+    E_ADD_USER, E_SEARCH, E_LOCK, emoji_id
 )
 from services.notifications import notify_all_participants
 
