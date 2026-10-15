@@ -962,22 +962,20 @@ async def admin_anonymity_menu(callback: CallbackQuery, state: FSMContext):
     
     text = (
         f"{E_LOCK} <b>Центр приватности и анонимного чата</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Управление видимостью участников, фильтрацией сообщений и анонимным общением.\n\n"
+        f"<blockquote><i>Управление видимостью участников, фильтрацией сообщений и анонимным общением</i></blockquote>\n\n"
         f"<b>1. Режим раскрытия подопечного:</b>\n"
         f"• Текущий: <b>{mode_title}</b>\n"
         f"• <i>{mode_expl}</i>\n\n"
         f"<b>2. Автофильтр деанонимизации:</b> {filter_icon} <b>{filter_status}</b>\n"
-        f"• <i>Блокирует попытки раскрыть личность через вопросы (проверки на имя, пол, контакты, ссылки и упоминания).</i>\n\n"
+        f"• <i>Блокирует попытки раскрыть личность через вопросы (проверки на имя, пол, контакты, ссылки).</i>\n\n"
         f"<b>3. Премодерация записок:</b> {mod_icon} <b>{mod_status}</b>\n"
         f"• <i>Каждый вопрос подопечному или ответ Санте сначала отправляется администраторам на проверку.</i>\n\n"
         f"<b>4. Анонимный чат «Санта — Подопечный»:</b> {chat_icon} <b>{chat_status}</b>\n"
         f"• <i>Позволяет участникам уточнять детали подарка через бота без раскрытия своей личности.</i>\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
         f"{E_STATS} <b>Активность записок:</b>\n"
-        f"• Всего отправлено: <b>{stats['sent']}</b>\n"
+        f"<blockquote>• Всего отправлено: <b>{stats['sent']}</b>\n"
         f"• Одобрено админом: <b>{stats['approved']}</b>\n"
-        f"• Отклонено: <b>{stats['rejected']}</b>\n\n"
+        f"• Отклонено: <b>{stats['rejected']}</b></blockquote>\n\n"
         f"{E_INFO} <i>Нажимайте на кнопки ниже для мгновенного переключения настроек:</i>"
     )
     
@@ -1671,10 +1669,8 @@ async def admin_approve_note(callback: CallbackQuery, bot: Bot):
     
     if note_type == "question":
         receiver_text = (
-            f"{E_GIFT} <b>Вам пришла анонимная записка от вашего Тайного Санты!</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"«{escaped_text}»\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{E_GIFT} <b>Вам пришла анонимная записка от вашего Тайного Санты!</b>\n\n"
+            f"<blockquote>«{escaped_text}»</blockquote>\n\n"
             f"{E_SPARKLES} <i>Вы можете ответить Санте анонимно, нажав кнопку ниже:</i>"
         )
         receiver_kb = InlineKeyboardBuilder()
@@ -1701,10 +1697,8 @@ async def admin_approve_note(callback: CallbackQuery, bot: Bot):
             )
     else:
         santa_text = (
-            f"{E_MESSAGE} <b>Ответ от вашего подопечного!</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"«{escaped_text}»\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{E_MESSAGE} <b>Ответ от вашего подопечного!</b>\n\n"
+            f"<blockquote>«{escaped_text}»</blockquote>\n\n"
             f"{E_SPARKLES} <i>Если хотите уточнить ещё что-то, вы можете задать новый вопрос:</i>"
         )
         santa_kb = InlineKeyboardBuilder()
@@ -1849,14 +1843,12 @@ async def admin_reveal_do(callback: CallbackQuery, bot: Bot):
             rec_text = ""
         
         reveal_msg = (
-            f"{E_PARTY} <b>ТАЙНА САНТЫ РАСКРЫТА!</b> {E_SPARKLES}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{E_PARTY} <b>ТАЙНА САНТЫ РАСКРЫТА!</b> {E_SPARKLES}\n\n"
             f"{E_GIFT} <b>Вашим Тайным Сантой был(а):</b>\n"
             f"{E_CROWN} <b>{santa_name}</b>! {E_PARTY}\n\n"
-            f"{rec_text}"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"Надеемся, подарки принесли вам море радости и новогоднего настроения! {E_PARTY}\n"
-            f"Счастливого Нового Года! {E_SPARKLES}"
+            f"{rec_text}\n"
+            f"<i>Надеемся, подарки принесли вам море радости и новогоднего настроения! {E_PARTY}\n"
+            f"Счастливого Нового Года! {E_SPARKLES}</i>"
         )
         
         ok, _ = await send_message_safe(bot, uid, reveal_msg, parse_mode="HTML")

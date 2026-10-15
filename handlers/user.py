@@ -244,14 +244,13 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
     wish_safe = html.escape(user_data.get('wish', 'Не указано'), quote=False)
     
     text = (
-        f"{E_GIFT} <b>Ваша анкета Тайного Санты:</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{E_GIFT} <b>Ваша анкета Тайного Санты:</b>\n\n"
         f"{E_USER} <b>Имя:</b> {display_name_safe}\n"
         f"{E_TAG} <b>Секретный код подарка:</b> <code>#{user_data['key']}</code>\n"
         f"<i>(Подарок с этим кодом будет ждать вас под ёлкой!)</i>\n"
         f"• <b>Пол:</b> {gender_str}\n\n"
         f"{E_GIFT} <b>Ваше желание:</b>\n"
-        f"«{wish_safe}»\n\n"
+        f"<blockquote>«{wish_safe}»</blockquote>\n\n"
     )
     wish_link = user_data.get('wish_link', '')
     if wish_link:
@@ -266,8 +265,7 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
     text += (
         f"{E_SETTINGS} <b>Лимиты правок:</b>\n"
         f"• Смена желания: {3 - user_data.get('wish_changes', 0)} из 3 осталось\n"
-        f"• Смена пола: {gender_status}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"• Смена пола: {gender_status}\n\n"
     )
     
     if user_data.get('gift_to_user_id'):
@@ -291,8 +289,7 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
                 else:
                     text += f"• Ссылка на подарок: {formatted_rec}\n"
         text += (
-            f"\n{E_MONEY} Бюджет: до <b>{GIFT_BUDGET} ₽</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"\n{E_MONEY} Бюджет: до <b>{GIFT_BUDGET} ₽</b>\n\n"
             f"С наступающим Новым Годом! {E_PARTY}{E_SPARKLES}\n\n"
         )
         if await db.is_chat_enabled():
@@ -854,13 +851,12 @@ async def ask_receiver_start(callback: CallbackQuery, state: FSMContext):
     await state.update_data(receiver_id=receiver_id)
     
     text = (
-        f"{E_GIFT} <b>Анонимная записка подопечному</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{E_GIFT} <b>Анонимная записка подопечному</b>\n\n"
         f"Здесь вы можете задать любой вопрос вашему подопечному, чтобы подарок точно пришёлся по душе "
         f"(размер одежды, любимый цвет, аллергии, модель гаджета и др.).\n\n"
         f"{E_LOCK} <b>Ваша личность останется в секрете!</b>\n"
         f"Подопечный получит вопрос от имени «Тайный Санта» и сможет ответить вам через бота.\n\n"
-        f"Напишите текст вопроса и отправьте сообщением:"
+        f"<i>Напишите текст вопроса и отправьте сообщением:</i>"
     )
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="Отмена", callback_data="cancel_anonymous_santa", icon_custom_emoji_id=emoji_id("back"))
@@ -963,12 +959,10 @@ async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
         receiver_key = receiver_data.get('key', '---') if receiver_data else '---'
         
         admin_text = (
-            f"{E_BELL} <b>Новая записка на модерации! (Вопрос Санты)</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{E_BELL} <b>Новая записка на модерации! (Вопрос Санты)</b>\n\n"
             f"• <b>Санта:</b> {sender_name} (<code>ID: {message.from_user.id}</code>)\n"
             f"• <b>Подопечный:</b> {receiver_name} (Код: <code>#{receiver_key}</code>)\n\n"
-            f"{E_MESSAGE} <b>Текст вопроса:</b>\n«{escaped_question}»\n"
-            f"━━━━━━━━━━━━━━━━━━━━"
+            f"{E_MESSAGE} <b>Текст вопроса:</b>\n<blockquote>«{escaped_question}»</blockquote>"
         )
         admin_kb = InlineKeyboardBuilder()
         admin_kb.button(text="Одобрить", callback_data=f"mod_appr_{note_id}", icon_custom_emoji_id=emoji_id("check"))
@@ -980,10 +974,8 @@ async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
         return
     
     receiver_text = (
-        f"{E_GIFT} <b>Вам пришла анонимная записка от вашего Тайного Санты!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"«{escaped_question}»\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{E_GIFT} <b>Вам пришла анонимная записка от вашего Тайного Санты!</b>\n\n"
+        f"<blockquote>«{escaped_question}»</blockquote>\n\n"
         f"{E_SPARKLES} <i>Вы можете ответить Санте анонимно, нажав кнопку ниже:</i>"
     )
     receiver_kb = InlineKeyboardBuilder()
@@ -1055,10 +1047,9 @@ async def reply_santa_start(callback: CallbackQuery, state: FSMContext):
     await state.update_data(santa_id=santa_id)
     
     text = (
-        f"{E_MESSAGE} <b>Ответ вашему Тайному Санте</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{E_MESSAGE} <b>Ответ вашему Тайному Санте</b>\n\n"
         f"Напишите ответ на вопрос Санты. Санта увидит только текст вашего ответа, а ваша личность останется в секрете.\n\n"
-        f"Напишите текст ответа и отправьте сообщением:"
+        f"<i>Напишите текст ответа и отправьте сообщением:</i>"
     )
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="Отмена", callback_data="cancel_anonymous_reply", icon_custom_emoji_id=emoji_id("back"))
@@ -1170,12 +1161,10 @@ async def process_receiver_reply(message: Message, state: FSMContext, bot: Bot):
         santa_name = html.escape(santa_data.get('display_name') or f"ID {santa_id}", quote=False) if santa_data else f"ID {santa_id}"
         
         admin_text = (
-            f"{E_BELL} <b>Новая записка на модерации! (Ответ подопечного)</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{E_BELL} <b>Новая записка на модерации! (Ответ подопечного)</b>\n\n"
             f"• <b>Подопечный:</b> {sender_name} (Код: <code>#{sender_key}</code>)\n"
             f"• <b>Санта:</b> {santa_name} (<code>ID: {santa_id}</code>)\n\n"
-            f"{E_MESSAGE} <b>Текст ответа:</b>\n«{escaped_reply}»\n"
-            f"━━━━━━━━━━━━━━━━━━━━"
+            f"{E_MESSAGE} <b>Текст ответа:</b>\n<blockquote>«{escaped_reply}»</blockquote>"
         )
         admin_kb = InlineKeyboardBuilder()
         admin_kb.button(text="Одобрить", callback_data=f"mod_appr_{note_id}", icon_custom_emoji_id=emoji_id("check"))
@@ -1187,10 +1176,8 @@ async def process_receiver_reply(message: Message, state: FSMContext, bot: Bot):
         return
     
     santa_text = (
-        f"{E_MESSAGE} <b>Ответ от вашего подопечного!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"«{escaped_reply}»\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{E_MESSAGE} <b>Ответ от вашего подопечного!</b>\n\n"
+        f"<blockquote>«{escaped_reply}»</blockquote>\n\n"
         f"{E_SPARKLES} <i>Если хотите уточнить ещё что-то, вы можете задать новый вопрос:</i>"
     )
     santa_kb = InlineKeyboardBuilder()
