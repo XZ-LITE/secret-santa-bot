@@ -36,7 +36,7 @@ class AccessMiddleware(BaseMiddleware):
             )
             if is_admin_callback:
                 if user_id not in ADMIN_IDS:
-                    await event.callback_query.answer("⛔ Доступ запрещен", show_alert=True)
+                    await event.callback_query.answer("Доступ запрещен", show_alert=True)
                     return
                 return await handler(event, data)
         
@@ -61,7 +61,7 @@ class AccessMiddleware(BaseMiddleware):
                             parse_mode="HTML"
                         )
                     elif event.callback_query:
-                        await event.callback_query.answer("⛔ Доступ ограничен", show_alert=True)
+                        await event.callback_query.answer("Доступ ограничен", show_alert=True)
                 except Exception:
                     pass
                 return

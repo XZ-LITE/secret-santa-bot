@@ -12,7 +12,7 @@ from services.notifications import start_reminder_scheduler
 async def main():
     if not BOT_TOKEN:
         print("=" * 50)
-        print("❌ ТОКЕН БОТА НЕ НАЙДЕН!")
+        print("[ERROR] ТОКЕН БОТА НЕ НАЙДЕН!")
         print("=" * 50)
         print("Установите переменную окружения `BOT_TOKEN` или добавьте её в файл `.env`.")
         print("Получить токен: @BotFather → /newbot")
@@ -50,13 +50,13 @@ async def main():
     bot_info = await bot.get_me()
 
     print("=" * 50)
-    print("🎅 Бот Тайный Санта запущен!")
-    print(f"🤖 Бот: @{bot_info.username}")
-    print(f"🎯 Участников: {total_participants}")
-    print(f"💰 Бюджет подарка: {GIFT_BUDGET} рублей")
-    print(f"🔑 Доступно для {len(allowed_users)} пользователей")
-    print(f"👑 Админы: {ADMIN_IDS}")
-    print(f"⏰ Регистрация открыта до: {deadline.strftime('%d.%m.%Y %H:%M')}")
+    print("Бот Тайный Санта запущен!")
+    print(f"Бот: @{bot_info.username}")
+    print(f"Участников: {total_participants}")
+    print(f"Бюджет подарка: {GIFT_BUDGET} рублей")
+    print(f"Доступно для {len(allowed_users)} пользователей")
+    print(f"Админы: {ADMIN_IDS}")
+    print(f"Регистрация открыта до: {deadline.strftime('%d.%m.%Y %H:%M')}")
     print("=" * 50)
 
     # Запускаем фоновый планировщик напоминаний

@@ -78,7 +78,7 @@ async def admin_panel(callback: CallbackQuery, state: FSMContext):
     """Панель администратора"""
     await state.clear()
     if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("⛔ У вас нет доступа к админ-панели", show_alert=True)
+        await callback.answer("У вас нет доступа к админ-панели", show_alert=True)
         return
     
     is_open, time_left_msg = is_registration_open()
@@ -558,9 +558,9 @@ async def admin_user_reset(callback: CallbackQuery):
     uid = int(callback.data.replace("admin_user_reset_", ""))
     success = await db.reset_user_changes(uid, "all")
     if success:
-        await callback.answer("✅ Лимиты изменений успешно сброшены!", show_alert=True)
+        await callback.answer("Лимиты изменений успешно сброшены!", show_alert=True)
     else:
-        await callback.answer("❌ Не удалось сбросить лимиты (возможно, распределение уже завершено)", show_alert=True)
+        await callback.answer("Не удалось сбросить лимиты (возможно, распределение уже завершено)", show_alert=True)
     
     user_data = await db.get_user(uid)
     all_users = await db.get_all_users()
@@ -589,9 +589,9 @@ async def admin_user_remind_one(callback: CallbackQuery, bot: Bot):
     success, _ = await send_message_safe(bot, uid, msg, parse_mode="HTML")
     if success:
         await db.update_last_reminder(uid)
-        await callback.answer("✅ Персональное напоминание отправлено!", show_alert=True)
+        await callback.answer("Персональное напоминание отправлено!", show_alert=True)
     else:
-        await callback.answer("❌ Не удалось отправить (пользователь ещё ни разу не запускал бота)", show_alert=True)
+        await callback.answer("Не удалось отправить (пользователь ещё ни разу не запускал бота)", show_alert=True)
 
 @admin_router.callback_query(F.data.startswith("admin_user_msg_"))
 async def admin_user_msg_start(callback: CallbackQuery, state: FSMContext):
@@ -656,7 +656,7 @@ async def admin_user_del_confirm(callback: CallbackQuery):
     """Подтверждение удаления участника"""
     uid = int(callback.data.replace("admin_user_del_confirm_", ""))
     if uid in ADMIN_IDS:
-        await callback.answer("⛔ Нельзя удалить администратора!", show_alert=True)
+        await callback.answer("Нельзя удалить администратора!", show_alert=True)
         return
     
     user_data = await db.get_user(uid)
@@ -679,14 +679,14 @@ async def admin_user_del_do(callback: CallbackQuery):
     """Выполнение удаления участника"""
     uid = int(callback.data.replace("admin_user_del_do_", ""))
     if uid in ADMIN_IDS:
-        await callback.answer("⛔ Нельзя удалить администратора!", show_alert=True)
+        await callback.answer("Нельзя удалить администратора!", show_alert=True)
         return
     
     success = await db.remove_allowed_user(uid)
     if success:
-        await callback.answer("✅ Участник успешно удалён!", show_alert=True)
+        await callback.answer("Участник успешно удалён!", show_alert=True)
     else:
-        await callback.answer("❌ Нельзя удалить участника после распределения (сначала сбросьте распределение)", show_alert=True)
+        await callback.answer("Нельзя удалить участника после распределения (сначала сбросьте распределение)", show_alert=True)
     
     users_list = await _build_admin_users_list()
     count = await db.get_participants_count()
@@ -926,8 +926,8 @@ async def admin_settings(callback: CallbackQuery, state: FSMContext):
 async def admin_toggle_moderation_handler(callback: CallbackQuery, state: FSMContext):
     """Переключение премодерации записок"""
     new_val = await db.toggle_moderation()
-    status_str = "ВКЛЮЧЕНА ✅" if new_val else "ВЫКЛЮЧЕНА ❌"
-    await callback.answer(f"Премодерация записок {status_str}", show_alert=True)
+    status_str = "ВКЛЮЧЕНА" if new_val else "ВЫКЛЮЧЕНА"
+    await callback.answer(f"Премодерация записок: {status_str}!", show_alert=True)
     await admin_settings(callback, state)
 
 @admin_router.callback_query(F.data == "admin_set_deadline")
@@ -999,7 +999,7 @@ async def admin_distribution_menu(callback: CallbackQuery, state: FSMContext):
     is_distributed = await db.is_distribution_done()
     is_revealed = await db.is_reveal_done()
     
-    reveal_status_str = "Да ✅" if is_revealed else "Ожидает финала ⏳"
+    reveal_status_str = f"Да {E_CHECK}" if is_revealed else f"Ожидает финала {E_HOURGLASS}"
     text = (
         f"{E_DICE} <b>Управление распределением</b>\n\n"
         f"{E_USERS} Зарегистрировано: <b>{count}/{total_participants}</b> участников\n"
@@ -1435,7 +1435,7 @@ async def admin_notify_selected_continue(callback: CallbackQuery, state: FSMCont
     state_data = await state.get_data()
     selected_users = state_data.get("selected_users", [])
     if not selected_users:
-        await callback.answer("❌ Вы не выбрали ни одного пользователя", show_alert=True)
+        await callback.answer("Вы не выбрали ни одного пользователя", show_alert=True)
         return
     
     await callback.message.edit_text(
@@ -1553,7 +1553,7 @@ async def admin_approve_note(callback: CallbackQuery, bot: Bot):
     note = await db.pop_pending_note(note_id)
     
     if not note:
-        await callback.answer("⚠️ Эта записка уже была обработана другим администратором.", show_alert=True)
+        await callback.answer("Эта записка уже была обработана другим администратором.", show_alert=True)
         try:
             await callback.message.edit_reply_markup(reply_markup=None)
         except Exception:
@@ -1655,7 +1655,7 @@ async def admin_reject_note(callback: CallbackQuery, bot: Bot):
     note = await db.pop_pending_note(note_id)
     
     if not note:
-        await callback.answer("⚠️ Эта записка уже была обработана.", show_alert=True)
+        await callback.answer("Эта записка уже была обработана.", show_alert=True)
         try:
             await callback.message.edit_reply_markup(reply_markup=None)
         except Exception:
@@ -1750,7 +1750,7 @@ async def admin_reveal_do(callback: CallbackQuery, bot: Bot):
             f"{E_PARTY} <b>ТАЙНА САНТЫ РАСКРЫТА!</b> {E_SPARKLES}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"{E_GIFT} <b>Вашим Тайным Сантой был(а):</b>\n"
-            f"👉 <b>{santa_name}</b>! 👈\n\n"
+            f"{E_CROWN} <b>{santa_name}</b>! {E_PARTY}\n\n"
             f"{rec_text}"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"Надеемся, подарки принесли вам море радости и новогоднего настроения! {E_PARTY}\n"

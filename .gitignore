@@ -37,6 +37,7 @@ logs/
 *.xlsx
 *.json
 !data/.gitkeep
+!data/emojis_id.txt
 !backups/.gitkeep
 
 # IDE and OS

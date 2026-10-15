@@ -92,11 +92,11 @@ async def process_request_access(callback: CallbackQuery, bot: Bot):
     """Обработка подачи заявки на доступ к боту"""
     user_id = callback.from_user.id
     if await db.check_access(user_id):
-        await callback.answer("✅ У вас уже есть доступ к боту! Нажмите /start", show_alert=True)
+        await callback.answer("У вас уже есть доступ к боту! Нажмите /start", show_alert=True)
         return
     
     if await db.has_pending_access_request(user_id):
-        await callback.answer("⏳ Ваша заявка уже на рассмотрении у администраторов!", show_alert=True)
+        await callback.answer("Ваша заявка уже на рассмотрении у администраторов!", show_alert=True)
         return
     
     user_info = {
@@ -599,15 +599,15 @@ async def change_wish_menu(callback: CallbackQuery, state: FSMContext):
     """Меню изменения желания"""
     user_data = await db.get_user(callback.from_user.id)
     if not user_data:
-        await callback.answer("❌ Вы не зарегистрированы", show_alert=True)
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     
     if user_data.get('wish_changes', 0) >= 3:
-        await callback.answer("❌ Вы уже использовали все 3 изменения желания", show_alert=True)
+        await callback.answer("Вы уже использовали все 3 изменения желания", show_alert=True)
         return
     
     if user_data.get('gift_to_user_id'):
-        await callback.answer("❌ Нельзя менять желание после распределения", show_alert=True)
+        await callback.answer("Нельзя менять желание после распределения", show_alert=True)
         return
     
     wish_link = user_data.get('wish_link', '')
@@ -737,15 +737,15 @@ async def change_gender_menu(callback: CallbackQuery, state: FSMContext):
     """Меню изменения пола"""
     user_data = await db.get_user(callback.from_user.id)
     if not user_data:
-        await callback.answer("❌ Вы не зарегистрированы", show_alert=True)
+        await callback.answer("Вы не зарегистрированы", show_alert=True)
         return
     
     if user_data.get('gender_changed', False):
-        await callback.answer("❌ Вы уже использовали смену пола", show_alert=True)
+        await callback.answer("Вы уже использовали смену пола", show_alert=True)
         return
     
     if user_data.get('gift_to_user_id'):
-        await callback.answer("❌ Нельзя менять пол после распределения", show_alert=True)
+        await callback.answer("Нельзя менять пол после распределения", show_alert=True)
         return
     
     gender_text = f"Мужской {E_USER}" if user_data['gender'] == 'male' else f"Женский {E_USER}"
@@ -826,7 +826,7 @@ async def back_to_main_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # -------------------------------------------------------------
-# Анонимный чат «Санта ↔ Подопечный» (Анонимные записки)
+# Анонимный чат: Санта и Подопечный (Анонимные записки)
 # -------------------------------------------------------------
 
 @user_router.callback_query(F.data == "ask_receiver")

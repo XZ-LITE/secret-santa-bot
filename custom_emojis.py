@@ -1,18 +1,21 @@
 """
 Модуль поддержки премиум эмодзи Telegram (пак tgiosicons / Telegram iOS Icons, 400 иконок)
-По гайду: https://emoji.wivvi.net
+По гайду: https://emoji.wivvi.net и справочнику id.txt
 
 Правила:
-- В сообщениях: <tg-emoji emoji-id="ID">эмодзи</tg-emoji> (parse_mode="HTML")
+- В боте ВООБЩЕ нет обычных эмодзи.
+- В сообщениях: ТОЛЬКО премиум эмодзи <tg-emoji emoji-id="ID">fallback</tg-emoji> (parse_mode="HTML")
 - В кнопках (InlineKeyboardButton / KeyboardButton):
-  текст без эмодзи, иконка передаётся через icon_custom_emoji_id="ID"
-- Во всплывающих уведомлениях callback.answer() используются обычные эмодзи.
+  текст строго без эмодзи, иконка передаётся через icon_custom_emoji_id="ID"
+- Во всплывающих окнах callback.answer(..., show_alert=True):
+  используется чистый текст без обычных эмодзи (Telegram alert не рендерит кастомные эмодзи).
 """
 
-from typing import Dict, Tuple
+import os
+import re
+from typing import Dict, Tuple, Optional
 
-# База данных премиум эмодзи из пака tgiosicons (https://emoji.wivvi.net)
-# Формат: ключ -> (fallback emoji, emoji_id)
+# Основные алиасы для удобного использования в коде (все ID строго из id.txt)
 EMOJI_DATA: Dict[str, Tuple[str, str]] = {
     "gift": ("🎁", "6032644646587338669"),
     "gift_give": ("🎁", "5805298713211447980"),
@@ -70,20 +73,104 @@ EMOJI_DATA: Dict[str, Tuple[str, str]] = {
     "bot": ("🤖", "6030400221232501136"),
 }
 
-def emoji_tag(name: str) -> str:
-    """Возвращает HTML-тег премиум эмодзи для отправки в тексте сообщения"""
-    if name not in EMOJI_DATA:
-        return ""
-    fallback, eid = EMOJI_DATA[name]
-    return f'<tg-emoji emoji-id="{eid}">{fallback}</tg-emoji>'
+# Динамический реестр всех 400 иконок из id.txt:
+# Поиск возможен по: slug ("gift"), русскому названию ("Подарок"), или напрямую по ID ("6032644646587338669")
+ALL_EMOJIS_BY_ID: Dict[str, Tuple[str, str]] = {}
+ALL_EMOJIS_BY_NAME: Dict[str, Tuple[str, str]] = {}
 
-def emoji_id(name: str) -> str:
-    """Возвращает строковый ID премиум эмодзи для поля icon_custom_emoji_id в кнопках"""
-    if name not in EMOJI_DATA:
-        return ""
-    return EMOJI_DATA[name][1]
+def _load_all_emojis():
+    possible_paths = [
+        os.path.join(os.path.dirname(__file__), "data", "emojis_id.txt"),
+        os.path.join(os.path.dirname(__file__), "..", "Desktop", "id.txt"),
+        r"e:\XZ_L1TE\Desktop\id.txt"
+    ]
+    txt_path = None
+    for p in possible_paths:
+        if os.path.exists(p):
+            txt_path = p
+            break
+            
+    if not txt_path:
+        return
 
-# Удобные предопределённые константы для текста сообщений
+    try:
+        with open(txt_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                m = re.match(r"^(.*?)\s+(\d+)$", line)
+                if m:
+                    text_part, eid = m.groups()
+                    m2 = re.match(r"^(\S+)\s+(.*)$", text_part)
+                    if m2:
+                        emo, title = m2.groups()
+                    else:
+                        emo, title = "", text_part
+                    ALL_EMOJIS_BY_ID[eid] = (emo, title)
+                    ALL_EMOJIS_BY_NAME[title.strip().lower()] = (emo, eid)
+    except Exception:
+        pass
+
+_load_all_emojis()
+
+def emoji_id(name_or_id: str) -> str:
+    """Возвращает строковый ID премиум эмодзи для icon_custom_emoji_id.
+    Принимает:
+    - Ключ алиаса (например, 'gift', 'check', 'cross')
+    - Русское название из id.txt (например, 'Подарок', 'Галочка')
+    - Прямой строковый ID
+    """
+    if not name_or_id:
+        return ""
+    
+    val = str(name_or_id).strip()
+    if val.isdigit():
+        return val
+        
+    if val in EMOJI_DATA:
+        return EMOJI_DATA[val][1]
+        
+    lower = val.lower()
+    if lower in ALL_EMOJIS_BY_NAME:
+        return ALL_EMOJIS_BY_NAME[lower][1]
+        
+    return ""
+
+def emoji_tag(name_or_id: str, fallback: Optional[str] = None) -> str:
+    """Возвращает HTML-тег премиум эмодзи для текста сообщения:
+    <tg-emoji emoji-id="ID">fallback</tg-emoji>
+    """
+    if not name_or_id:
+        return ""
+        
+    val = str(name_or_id).strip()
+    eid = ""
+    fb = fallback
+    
+    if val.isdigit():
+        eid = val
+        if eid in ALL_EMOJIS_BY_ID and not fb:
+            fb = ALL_EMOJIS_BY_ID[eid][0]
+    elif val in EMOJI_DATA:
+        fb_default, eid = EMOJI_DATA[val]
+        if not fb:
+            fb = fb_default
+    else:
+        lower = val.lower()
+        if lower in ALL_EMOJIS_BY_NAME:
+            fb_default, eid = ALL_EMOJIS_BY_NAME[lower]
+            if not fb:
+                fb = fb_default
+                
+    if not eid:
+        return ""
+    if not fb:
+        fb = "✨"
+        
+    return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>'
+
+# Предопределённые премиум константы для текста сообщений (HTML)
 E_GIFT = emoji_tag("gift")
 E_GIFT_STAR = emoji_tag("gift_star")
 E_GIFT_GIVE = emoji_tag("gift_give")
