@@ -61,8 +61,12 @@ class Database:
                     data["settings"] = {}
                 data["settings"].setdefault("total_participants", 20)
                 data["settings"].setdefault("registration_open", True)
+                data["settings"].setdefault("anonymity_mode", "code")
+                data["settings"].setdefault("filter_enabled", True)
                 data["settings"].setdefault("moderation_enabled", True)
+                data["settings"].setdefault("chat_enabled", True)
                 data["settings"].setdefault("reveal_done", False)
+                data.setdefault("notes_stats", {"sent": 0, "approved": 0, "rejected": 0})
                 if not isinstance(data.get("allowed_users"), list):
                     data["allowed_users"] = INITIAL_ALLOWED_USERS.copy()
                 if not isinstance(data.get("users"), dict):
@@ -110,10 +114,14 @@ class Database:
                 "access_requests": {},
                 "anonymous_notes": [],
                 "pending_notes": {},
+                "notes_stats": {"sent": 0, "approved": 0, "rejected": 0},
                 "settings": {
                     "total_participants": 20,
                     "registration_open": True,
+                    "anonymity_mode": "code",
+                    "filter_enabled": True,
                     "moderation_enabled": True,
+                    "chat_enabled": True,
                     "reveal_done": False
                 },
                 "allowed_users": INITIAL_ALLOWED_USERS.copy()
@@ -956,6 +964,69 @@ class Database:
                 "receiver_wish": receiver_data.get("wish", "Не указано"),
             })
         return pairs
+
+    async def get_anonymity_mode(self) -> str:
+        """Режим раскрытия подопечного: 'code', 'name', 'gender'"""
+        data = await self._read_db()
+        return data.get("settings", {}).get("anonymity_mode", "code")
+
+    async def cycle_anonymity_mode(self) -> str:
+        """Переключает режим раскрытия подопечного по кругу: code -> name -> gender -> code"""
+        data = await self._read_db()
+        curr = data.setdefault("settings", {}).get("anonymity_mode", "code")
+        modes = ["code", "name", "gender"]
+        idx = modes.index(curr) if curr in modes else 0
+        new_mode = modes[(idx + 1) % len(modes)]
+        data["settings"]["anonymity_mode"] = new_mode
+        await self._write_db(data)
+        return new_mode
+
+    async def is_filter_enabled(self) -> bool:
+        """Включен ли фильтр стоп-слов деанонимизации"""
+        data = await self._read_db()
+        return data.get("settings", {}).get("filter_enabled", True)
+
+    async def toggle_filter(self) -> bool:
+        """Переключает фильтр стоп-слов"""
+        data = await self._read_db()
+        curr = data.setdefault("settings", {}).get("filter_enabled", True)
+        new_val = not curr
+        data["settings"]["filter_enabled"] = new_val
+        await self._write_db(data)
+        return new_val
+
+    async def is_chat_enabled(self) -> bool:
+        """Включен ли анонимный чат «Санта - Подопечный»"""
+        data = await self._read_db()
+        return data.get("settings", {}).get("chat_enabled", True)
+
+    async def toggle_chat(self) -> bool:
+        """Переключает работу анонимного чата"""
+        data = await self._read_db()
+        curr = data.setdefault("settings", {}).get("chat_enabled", True)
+        new_val = not curr
+        data["settings"]["chat_enabled"] = new_val
+        await self._write_db(data)
+        return new_val
+
+    async def get_notes_stats(self) -> Dict[str, int]:
+        """Возвращает статистику анонимных записок"""
+        data = await self._read_db()
+        stats = data.get("notes_stats", {})
+        return {
+            "sent": stats.get("sent", 0),
+            "approved": stats.get("approved", 0),
+            "rejected": stats.get("rejected", 0)
+        }
+
+    @serialize_mutations
+    async def increment_notes_stat(self, key: str) -> None:
+        """Увеличивает счетчик статистики записок (sent, approved, rejected)"""
+        data = await self._read_db()
+        if "notes_stats" not in data or not isinstance(data["notes_stats"], dict):
+            data["notes_stats"] = {"sent": 0, "approved": 0, "rejected": 0}
+        data["notes_stats"][key] = data["notes_stats"].get(key, 0) + 1
+        await self._write_db(data)
 
 # Глобальный экземпляр базы данных
 db = Database(DB_PATH)

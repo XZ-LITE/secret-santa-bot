@@ -29,6 +29,7 @@ from keyboards import (
     get_admin_broadcasts_keyboard,
     get_admin_manage_users_keyboard,
     get_admin_settings_keyboard,
+    get_admin_anonymity_keyboard,
     get_back_keyboard,
     get_users_keyboard,
     get_multi_select_keyboard,
@@ -41,6 +42,7 @@ from utils import (
     is_registration_open,
     format_admin_user_card,
     format_wish_links,
+    format_recipient_info_for_santa,
     send_message_safe
 )
 from custom_emojis import (
@@ -908,19 +910,102 @@ async def admin_settings(callback: CallbackQuery, state: FSMContext):
     current_count = await db.get_total_participants()
     deadline = await db.get_registration_deadline()
     allowed_users = await db.get_allowed_users()
+    anon_mode = await db.get_anonymity_mode()
+    mode_name = {"code": "Код (#10001)", "name": "По имени", "gender": "По полу"}.get(anon_mode, anon_mode)
     is_mod = await db.is_moderation_enabled()
-    mod_status_text = "Включена" if is_mod else "Выключена"
+    is_filter = await db.is_filter_enabled()
+    is_chat = await db.is_chat_enabled()
     
     text = (
-        f"{E_SETTINGS} <b>Настройки</b>\n\n"
-        f"{E_TARGET} Текущее количество участников: <b>{current_count}</b>\n"
+        f"{E_SETTINGS} <b>Настройки бота</b>\n\n"
+        f"{E_TARGET} Количество участников: <b>{current_count}</b>\n"
         f"{E_USERS} Пользователей в списке доступа: <b>{len(allowed_users)}</b>\n"
         f"{E_CLOCK} Регистрация открыта до: <b>{deadline.strftime('%d.%m.%Y %H:%M')}</b>\n"
-        f"{E_MONEY} Бюджет подарка: <b>{GIFT_BUDGET} рублей</b>\n"
-        f"• Премодерация записок: <b>{mod_status_text}</b>"
+        f"{E_MONEY} Бюджет подарка: <b>{GIFT_BUDGET} рублей</b>\n\n"
+        f"{E_LOCK} <b>Приватность и переписка:</b>\n"
+        f"• Режим подопечного: <b>{mode_name}</b>\n"
+        f"• Фильтр стоп-слов: <b>{'ВКЛ' if is_filter else 'ВЫКЛ'}</b>\n"
+        f"• Премодерация записок: <b>{'ВКЛ' if is_mod else 'ВЫКЛ'}</b>\n"
+        f"• Анонимный чат: <b>{'ВКЛ' if is_chat else 'ВЫКЛ'}</b>"
     )
     await callback.message.edit_text(text, reply_markup=get_admin_settings_keyboard(moderation_enabled=is_mod), parse_mode="HTML")
     await callback.answer()
+
+@admin_router.callback_query(F.data == "admin_anonymity_menu")
+async def admin_anonymity_menu(callback: CallbackQuery, state: FSMContext):
+    """Меню управления анонимностью, фильтрами и чатом"""
+    await state.clear()
+    mode = await db.get_anonymity_mode()
+    is_filter = await db.is_filter_enabled()
+    is_mod = await db.is_moderation_enabled()
+    is_chat = await db.is_chat_enabled()
+    stats = await db.get_notes_stats()
+    
+    if mode == "name":
+        mode_desc = "<b>По имени</b> (Санта видит имя подопечного, подопечный не знает Санту)"
+    elif mode == "gender":
+        mode_desc = "<b>По полу</b> (Санта видит пол «парню/девушке» и код подарка)"
+    else:
+        mode_desc = "<b>Код подарка (#...)</b> (Строгая анонимность — пол и имя полностью скрыты)"
+        
+    filter_desc = f"<b>Включен</b> {E_CHECK}" if is_filter else f"<b>Выключен</b> {E_CROSS}"
+    mod_desc = f"<b>Включена</b> {E_CHECK}" if is_mod else f"<b>Выключена</b> {E_CROSS}"
+    chat_desc = f"<b>Включен</b> {E_CHECK}" if is_chat else f"<b>Выключен</b> {E_CROSS}"
+    
+    text = (
+        f"{E_LOCK} <b>Настройки приватности и анонимного чата</b>\n\n"
+        f"• <b>Режим отображения подопечного:</b>\n  └ {mode_desc}\n\n"
+        f"• <b>Автофильтр деанонимизации:</b> {filter_desc}\n"
+        f"  <i>(блокирует вопросы про имя, пол, ключи, телефоны, ссылки)</i>\n\n"
+        f"• <b>Премодерация записок админом:</b> {mod_desc}\n"
+        f"  <i>(проверка записок администраторами перед отправкой)</i>\n\n"
+        f"• <b>Анонимный чат «Санта и Подопечный»:</b> {chat_desc}\n\n"
+        f"{E_STATS} <b>Статистика записок:</b>\n"
+        f"  ├ Отправлено: <b>{stats['sent']}</b>\n"
+        f"  ├ Одобрено: <b>{stats['approved']}</b>\n"
+        f"  └ Отклонено: <b>{stats['rejected']}</b>\n\n"
+        f"Нажимайте на кнопки ниже для переключения настроек в 1 клик:"
+    )
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_admin_anonymity_keyboard(
+            anonymity_mode=mode,
+            filter_enabled=is_filter,
+            moderation_enabled=is_mod,
+            chat_enabled=is_chat
+        ),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@admin_router.callback_query(F.data == "admin_anon_mode_cycle")
+async def admin_anon_mode_cycle_handler(callback: CallbackQuery, state: FSMContext):
+    """Переключение режима раскрытия подопечного"""
+    new_mode = await db.cycle_anonymity_mode()
+    mode_titles = {
+        "code": "Строгий код подарка (#10001)",
+        "name": "По имени (Классический)",
+        "gender": "По полу (Парню/Девушке)"
+    }
+    await callback.answer(f"Режим изменен: {mode_titles.get(new_mode, new_mode)}!", show_alert=True)
+    await admin_anonymity_menu(callback, state)
+
+@admin_router.callback_query(F.data == "admin_toggle_filter")
+async def admin_toggle_filter_handler(callback: CallbackQuery, state: FSMContext):
+    """Переключение автофильтра стоп-слов"""
+    new_val = await db.toggle_filter()
+    status_str = "ВКЛЮЧЕН" if new_val else "ВЫКЛЮЧЕН"
+    await callback.answer(f"Автофильтр деанонимизации: {status_str}!", show_alert=True)
+    await admin_anonymity_menu(callback, state)
+
+@admin_router.callback_query(F.data == "admin_toggle_chat")
+async def admin_toggle_chat_handler(callback: CallbackQuery, state: FSMContext):
+    """Переключение работы анонимного чата"""
+    new_val = await db.toggle_chat()
+    status_str = "ВКЛЮЧЕН" if new_val else "ВЫКЛЮЧЕН"
+    await callback.answer(f"Анонимный чат: {status_str}!", show_alert=True)
+    await admin_anonymity_menu(callback, state)
 
 @admin_router.callback_query(F.data == "admin_toggle_moderation")
 async def admin_toggle_moderation_handler(callback: CallbackQuery, state: FSMContext):
@@ -928,7 +1013,7 @@ async def admin_toggle_moderation_handler(callback: CallbackQuery, state: FSMCon
     new_val = await db.toggle_moderation()
     status_str = "ВКЛЮЧЕНА" if new_val else "ВЫКЛЮЧЕНА"
     await callback.answer(f"Премодерация записок: {status_str}!", show_alert=True)
-    await admin_settings(callback, state)
+    await admin_anonymity_menu(callback, state)
 
 @admin_router.callback_query(F.data == "admin_set_deadline")
 async def admin_set_deadline_menu(callback: CallbackQuery, state: FSMContext):
@@ -1261,11 +1346,12 @@ async def admin_manual_distribute_select_receiver(callback: CallbackQuery, state
         if not await db.is_distribution_done():
             receiver_wish = html.escape(receiver_data.get('wish', 'не указано'), quote=False)
             receiver_links = format_wish_links(receiver_data.get('wish_link', ''))
-            receiver_key = receiver_data.get('key', '---')
+            mode = await db.get_anonymity_mode()
+            rec_info = format_recipient_info_for_santa(receiver_data, mode)
             
             message = (
                 f"{E_GIFT_STAR} <b>Ручное распределение Тайного Санты!</b>\n\n"
-                f"• <b>Код подарка:</b> <code>#{receiver_key}</code>\n"
+                f"{rec_info}"
                 f"• Желание получателя: <i>«{receiver_wish}»</i>\n"
             )
             if receiver_links and receiver_links != "Нет ссылки":
@@ -1640,6 +1726,7 @@ async def admin_approve_note(callback: CallbackQuery, bot: Bot):
         note_type=note_type,
         text=text_content
     )
+    await db.increment_notes_stat("approved")
     
     try:
         new_text = callback.message.html_text + f"\n\n{E_CHECK} <b>Одобрено администратором {admin_signature}</b>"
@@ -1673,6 +1760,7 @@ async def admin_reject_note(callback: CallbackQuery, bot: Bot):
         f"Пожалуйста, задавайте вопросы только о пожеланиях к подарку (размер, цвет, хобби, аллергия).</i>",
         parse_mode="HTML"
     )
+    await db.increment_notes_stat("rejected")
     
     try:
         new_text = callback.message.html_text + f"\n\n{E_CROSS} <b>Отклонено администратором {admin_signature}</b>"

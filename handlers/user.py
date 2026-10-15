@@ -28,7 +28,8 @@ from utils import (
     validate_wish_link,
     send_message_safe,
     generate_progress_bar,
-    check_deanonymization_text
+    check_deanonymization_text,
+    format_recipient_info_for_santa
 )
 from custom_emojis import (
     E_USER, E_USERS, E_GIFT, E_GIFT_STAR, E_CHECK, E_CROSS,
@@ -272,11 +273,12 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
     if user_data.get('gift_to_user_id'):
         receiver_id = user_data.get('gift_to_user_id')
         receiver_data = await db.get_user(receiver_id) if receiver_id else None
-        receiver_key = receiver_data.get('key', '---') if receiver_data else '---'
+        mode = await db.get_anonymity_mode()
+        rec_info = format_recipient_info_for_santa(receiver_data, mode) if receiver_data else ""
         
         text += (
             f"{E_GIFT_STAR} <b>ВАШ ПОДОПЕЧНЫЙ:</b>\n"
-            f"• <b>Код подарка:</b> <code>#{receiver_key}</code>\n"
+            f"{rec_info}"
         )
         if receiver_data:
             rec_wish = html.escape(receiver_data.get('wish', 'не указано'), quote=False)
@@ -292,8 +294,9 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
             f"\n{E_MONEY} Бюджет: до <b>{GIFT_BUDGET} ₽</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"С наступающим Новым Годом! {E_PARTY}{E_SPARKLES}\n\n"
-            f"{E_NEW_MESSAGE} <i>Вы можете задать подопечному анонимный вопрос кнопкой ниже!</i>"
         )
+        if await db.is_chat_enabled():
+            text += f"{E_NEW_MESSAGE} <i>Вы можете задать подопечному анонимный вопрос кнопкой ниже!</i>"
     else:
         count = await db.get_participants_count()
         progress = generate_progress_bar(count, total_participants)
@@ -304,7 +307,8 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
         keyboard.button(text="Изменить желание", callback_data="change_wish_menu", icon_custom_emoji_id=emoji_id("edit"))
         keyboard.button(text="Изменить пол", callback_data="change_gender_menu", icon_custom_emoji_id=emoji_id("repeat"))
     else:
-        keyboard.button(text="Спросить подопечного анонимно", callback_data="ask_receiver", icon_custom_emoji_id=emoji_id("new_message"))
+        if await db.is_chat_enabled():
+            keyboard.button(text="Спросить подопечного анонимно", callback_data="ask_receiver", icon_custom_emoji_id=emoji_id("new_message"))
     keyboard.button(text="Назад в меню", callback_data="back_to_main", icon_custom_emoji_id=emoji_id("back"))
     keyboard.adjust(1)
     
@@ -832,6 +836,10 @@ async def back_to_main_menu(callback: CallbackQuery, state: FSMContext):
 @user_router.callback_query(F.data == "ask_receiver")
 async def ask_receiver_start(callback: CallbackQuery, state: FSMContext):
     """Санта открывает меню отправки анонимного вопроса своему подопечному"""
+    if not await db.is_chat_enabled():
+        await callback.answer("Анонимный чат временно отключен организатором", show_alert=True)
+        return
+        
     user_data = await db.get_user(callback.from_user.id)
     if not user_data or not user_data.get("gift_to_user_id"):
         await callback.answer("Распределение ещё не проведено или у вас нет подопечного!", show_alert=True)
@@ -870,6 +878,11 @@ async def cancel_anonymous_santa(callback: CallbackQuery, state: FSMContext):
 @user_router.message(AnonymousChatSanta.entering_question)
 async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
     """Обработка текста анонимного вопроса от Санты и пересылка подопечному"""
+    if not await db.is_chat_enabled():
+        await message.answer(f"{E_LOCK} Анонимный чат временно отключен организатором игры.", parse_mode="HTML")
+        await state.clear()
+        return
+
     if not message.text or not message.text.strip():
         await message.answer(
             f"{E_WARNING} Пожалуйста, отправьте текстовый вопрос для вашего подопечного.",
@@ -904,16 +917,19 @@ async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
     
     escaped_question = html.escape(question_text, quote=False)
     
-    # 1. Проверка автофильтром стоп-слов деанонимизации
-    deanonym_issue = check_deanonymization_text(question_text)
-    if deanonym_issue:
-        await message.answer(
-            f"{E_WARNING} <b>Вопрос отклонён фильтром безопасности:</b>\n{deanonym_issue}.\n\n"
-            f"<i>В игре «Тайный Санта» запрещено спрашивать или раскрывать имена, контакты, пол или номера. "
-            f"Задавайте вопросы только о пожеланиях к подарку (размер, цвет, хобби, аллергия).</i>",
-            parse_mode="HTML"
-        )
-        return
+    # 1. Проверка автофильтром стоп-слов деанонимизации (если включен)
+    if await db.is_filter_enabled():
+        deanonym_issue = check_deanonymization_text(question_text)
+        if deanonym_issue:
+            await message.answer(
+                f"{E_WARNING} <b>Вопрос отклонён фильтром безопасности:</b>\n{deanonym_issue}.\n\n"
+                f"<i>В игре «Тайный Санта» запрещено спрашивать или раскрывать имена, контакты, пол или номера. "
+                f"Задавайте вопросы только о пожеланиях к подарку (размер, цвет, хобби, аллергия).</i>",
+                parse_mode="HTML"
+            )
+            return
+            
+    await db.increment_notes_stat("sent")
     
     # 2. Проверка включения премодерации
     if await db.is_moderation_enabled():
@@ -998,6 +1014,7 @@ async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
         note_type="question",
         text=question_text
     )
+    await db.increment_notes_stat("approved")
     await state.clear()
     
     santa_kb = InlineKeyboardBuilder()
@@ -1016,6 +1033,10 @@ async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
 @user_router.callback_query(F.data.startswith("reply_santa_"))
 async def reply_santa_start(callback: CallbackQuery, state: FSMContext):
     """Подопечный нажимает кнопку 'Ответить Санте'"""
+    if not await db.is_chat_enabled():
+        await callback.answer("Анонимный чат временно отключен организатором", show_alert=True)
+        return
+        
     try:
         santa_id = int(callback.data.replace("reply_santa_", ""))
     except ValueError:
@@ -1064,6 +1085,11 @@ async def cancel_anonymous_reply(callback: CallbackQuery, state: FSMContext):
 @user_router.message(AnonymousChatReceiver.entering_reply)
 async def process_receiver_reply(message: Message, state: FSMContext, bot: Bot):
     """Обработка ответа подопечного для Санты"""
+    if not await db.is_chat_enabled():
+        await message.answer(f"{E_LOCK} Анонимный чат временно отключен организатором игры.", parse_mode="HTML")
+        await state.clear()
+        return
+
     if not message.text or not message.text.strip():
         await message.answer(
             f"{E_WARNING} Пожалуйста, отправьте текстовый ответ для вашего Тайного Санты.",
@@ -1098,16 +1124,19 @@ async def process_receiver_reply(message: Message, state: FSMContext, bot: Bot):
     
     escaped_reply = html.escape(reply_text, quote=False)
     
-    # 1. Проверка автофильтром стоп-слов деанонимизации
-    deanonym_issue = check_deanonymization_text(reply_text)
-    if deanonym_issue:
-        await message.answer(
-            f"{E_WARNING} <b>Ответ отклонён фильтром безопасности:</b>\n{deanonym_issue}.\n\n"
-            f"<i>В игре «Тайный Санта» запрещено спрашивать или раскрывать имена, контакты, пол или номера. "
-            f"Отвечайте только на вопрос о подарке.</i>",
-            parse_mode="HTML"
-        )
-        return
+    # 1. Проверка автофильтром стоп-слов деанонимизации (если включен)
+    if await db.is_filter_enabled():
+        deanonym_issue = check_deanonymization_text(reply_text)
+        if deanonym_issue:
+            await message.answer(
+                f"{E_WARNING} <b>Ответ отклонён фильтром безопасности:</b>\n{deanonym_issue}.\n\n"
+                f"<i>В игре «Тайный Санта» запрещено спрашивать или раскрывать имена, контакты, пол или номера. "
+                f"Отвечайте только на вопрос о подарке.</i>",
+                parse_mode="HTML"
+            )
+            return
+
+    await db.increment_notes_stat("sent")
 
     # 2. Проверка включения премодерации
     if await db.is_moderation_enabled():
@@ -1197,6 +1226,7 @@ async def process_receiver_reply(message: Message, state: FSMContext, bot: Bot):
         note_type="reply",
         text=reply_text
     )
+    await db.increment_notes_stat("approved")
     await state.clear()
     
     ack_kb = InlineKeyboardBuilder()

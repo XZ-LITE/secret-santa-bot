@@ -44,11 +44,12 @@ def get_admin_keyboard():
     keyboard.button(text="Участники", callback_data="admin_manage_users", icon_custom_emoji_id=emoji_id("users"))
     keyboard.button(text="Распределение", callback_data="admin_distribution_menu", icon_custom_emoji_id=emoji_id("dice"))
     keyboard.button(text="Рассылки", callback_data="admin_broadcasts_menu", icon_custom_emoji_id=emoji_id("megaphone"))
+    keyboard.button(text="Приватность и чат", callback_data="admin_anonymity_menu", icon_custom_emoji_id=emoji_id("lock"))
     keyboard.button(text="Экспорт в Excel", callback_data="admin_export_excel", icon_custom_emoji_id=emoji_id("file"))
     keyboard.button(text="Бэкап базы", callback_data="admin_backup", icon_custom_emoji_id=emoji_id("archive"))
     keyboard.button(text="Настройки", callback_data="admin_settings", icon_custom_emoji_id=emoji_id("settings"))
     keyboard.button(text="В главное меню", callback_data="back_to_main", icon_custom_emoji_id=emoji_id("back"))
-    keyboard.adjust(2, 2, 2, 2)
+    keyboard.adjust(2, 2, 1, 2, 2)
     return keyboard.as_markup()
 
 def get_admin_distribution_keyboard(is_distributed: bool = False, is_revealed: bool = False):
@@ -177,12 +178,52 @@ def get_admin_user_del_confirm_keyboard(user_id: int | str):
 
 def get_admin_settings_keyboard(moderation_enabled: bool = True):
     keyboard = InlineKeyboardBuilder()
-    mod_text = "Премодерация записок: ВКЛ" if moderation_enabled else "Премодерация записок: ВЫКЛ"
-    mod_icon = emoji_id("lock") if moderation_enabled else emoji_id("unlock")
-    keyboard.button(text=mod_text, callback_data="admin_toggle_moderation", icon_custom_emoji_id=mod_icon)
+    keyboard.button(text="Приватность и чат", callback_data="admin_anonymity_menu", icon_custom_emoji_id=emoji_id("lock"))
     keyboard.button(text="Изменить количество участников", callback_data="admin_set_participants", icon_custom_emoji_id=emoji_id("target"))
     keyboard.button(text="Изменить дедлайн регистрации", callback_data="admin_set_deadline", icon_custom_emoji_id=emoji_id("calendar"))
     keyboard.button(text="Назад", callback_data="admin_panel", icon_custom_emoji_id=emoji_id("back"))
+    keyboard.adjust(1)
+    return keyboard.as_markup()
+
+def get_admin_anonymity_keyboard(
+    anonymity_mode: str = "code",
+    filter_enabled: bool = True,
+    moderation_enabled: bool = True,
+    chat_enabled: bool = True
+):
+    """Клавиатура раздела управления приватностью и анонимным чатом"""
+    keyboard = InlineKeyboardBuilder()
+    
+    # 1. Режим раскрытия
+    if anonymity_mode == "name":
+        mode_label = "Режим: По имени (Классика)"
+        mode_icon = emoji_id("user")
+    elif anonymity_mode == "gender":
+        mode_label = "Режим: По полу (Парню/Девушке)"
+        mode_icon = emoji_id("user")
+    else:
+        mode_label = "Режим: Код подарка (#10001)"
+        mode_icon = emoji_id("lock")
+    keyboard.button(text=mode_label, callback_data="admin_anon_mode_cycle", icon_custom_emoji_id=mode_icon)
+    
+    # 2. Фильтр стоп-слов
+    filter_label = "Фильтр стоп-слов: ВКЛ" if filter_enabled else "Фильтр стоп-слов: ВЫКЛ"
+    filter_icon = emoji_id("check") if filter_enabled else emoji_id("cross")
+    keyboard.button(text=filter_label, callback_data="admin_toggle_filter", icon_custom_emoji_id=filter_icon)
+    
+    # 3. Премодерация записок
+    mod_label = "Премодерация записок: ВКЛ" if moderation_enabled else "Премодерация записок: ВЫКЛ"
+    mod_icon = emoji_id("lock") if moderation_enabled else emoji_id("unlock")
+    keyboard.button(text=mod_label, callback_data="admin_toggle_moderation", icon_custom_emoji_id=mod_icon)
+    
+    # 4. Анонимный чат
+    chat_label = "Анонимный чат: ВКЛ" if chat_enabled else "Анонимный чат: ВЫКЛ"
+    chat_icon = emoji_id("new_message") if chat_enabled else emoji_id("cross")
+    keyboard.button(text=chat_label, callback_data="admin_toggle_chat", icon_custom_emoji_id=chat_icon)
+    
+    # 5. Назад в админ-панель
+    keyboard.button(text="В админ-панель", callback_data="admin_panel", icon_custom_emoji_id=emoji_id("back"))
+    
     keyboard.adjust(1)
     return keyboard.as_markup()
 

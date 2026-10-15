@@ -5,7 +5,7 @@ import html
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import ADMIN_IDS, GIFT_BUDGET
-from utils import format_wish_links, send_message_safe
+from utils import format_wish_links, format_recipient_info_for_santa, send_message_safe
 from database import Database
 from custom_emojis import (
     E_CLOCK, E_BELL, E_GIFT, E_GIFT_STAR, E_PARTY, E_SPARKLES,
@@ -103,12 +103,13 @@ async def notify_all_participants(bot: Bot, db: Database):
         
         receiver_wish = html.escape(receiver_data.get('wish', 'не указано'), quote=False)
         receiver_links = format_wish_links(receiver_data.get('wish_link', ''))
-        receiver_key = receiver_data.get('key', '---')
+        mode = await db.get_anonymity_mode()
+        rec_info = format_recipient_info_for_santa(receiver_data, mode)
         
         message = (
             f"{E_GIFT} <b>Внимание! Все участники зарегистрировались!</b>\n\n"
             f"Распределение Тайного Санты завершено! {E_PARTY}{E_SPARKLES}\n\n"
-            f"• <b>Код подарка:</b> <code>#{receiver_key}</code>\n"
+            f"{rec_info}"
             f"• Желание получателя: <i>«{receiver_wish}»</i>\n"
         )
         

@@ -83,6 +83,31 @@ def check_deanonymization_text(text: str) -> Optional[str]:
 
     return None
 
+def format_recipient_info_for_santa(receiver_data: dict, anonymity_mode: str) -> str:
+    """Форматирует блок информации о подопечном для Санты в зависимости от выбранного режима анонимности:
+    - 'code': только персональный код подарка (строгая анонимность)
+    - 'name': имя подопечного и код подарка (классический режим)
+    - 'gender': пол и код подарка
+    """
+    receiver_key = receiver_data.get('key', '---')
+    if anonymity_mode == "name":
+        receiver_name = html.escape(
+            receiver_data.get('display_name') or receiver_data.get('username') or f"Участник #{receiver_key}",
+            quote=False
+        )
+        return f"• <b>Вы дарите подарок для:</b> <b>{receiver_name}</b> (Код: <code>#{receiver_key}</code>)\n"
+    elif anonymity_mode == "gender":
+        gender = receiver_data.get('gender')
+        if gender == "male":
+            gender_text = f"<b>парню</b> {E_USER}"
+        elif gender == "female":
+            gender_text = f"<b>девушке</b> {E_USER}"
+        else:
+            gender_text = f"<b>участнику</b> {E_USER}"
+        return f"• <b>Вы дарите подарок:</b> {gender_text} (Код: <code>#{receiver_key}</code>)\n"
+    else:  # "code"
+        return f"• <b>Код подарка подопечного:</b> <code>#{receiver_key}</code>\n"
+
 def validate_wish_link(link: str) -> bool:
     """Проверяет одну ссылку на корректность"""
     try:
