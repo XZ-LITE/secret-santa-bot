@@ -394,12 +394,22 @@ class Database:
     
     @serialize_mutations
     async def generate_unique_key(self) -> int:
-        """Генерирует уникальный 5-значный ключ"""
+        """Генерирует уникальный случайный 5-значный код подарка (10000-99999) для полной анонимности"""
         data = await self._read_db()
+        used_keys = set()
+        for u in data.get("users", {}).values():
+            if isinstance(u, dict) and u.get("key"):
+                used_keys.add(u["key"])
+                
+        import random
+        for _ in range(10000):
+            candidate = random.randint(10000, 99999)
+            if candidate not in used_keys:
+                await self._write_db(data)
+                return candidate
         
         key = data.get("next_key", 10000)
         data["next_key"] = key + 1
-        
         await self._write_db(data)
         return key
     

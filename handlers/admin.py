@@ -942,29 +942,43 @@ async def admin_anonymity_menu(callback: CallbackQuery, state: FSMContext):
     stats = await db.get_notes_stats()
     
     if mode == "name":
-        mode_desc = "<b>По имени</b> (Санта видит имя подопечного, подопечный не знает Санту)"
+        mode_title = "По имени (Классика)"
+        mode_expl = "Санта видит имя подопечного в сообщении и карточке."
     elif mode == "gender":
-        mode_desc = "<b>По полу</b> (Санта видит пол «парню/девушке» и код подарка)"
+        mode_title = "По полу (Парню / Девушке)"
+        mode_expl = "Санта видит только пол подопечного («парню» или «девушке») и его код подарка."
     else:
-        mode_desc = "<b>Код подарка (#...)</b> (Строгая анонимность — пол и имя полностью скрыты)"
+        mode_title = "Строгий код подарка"
+        mode_expl = "Имя и пол полностью скрыты. Санта видит только уникальный код подопечного (например, #48291)."
         
-    filter_desc = f"<b>Включен</b> {E_CHECK}" if is_filter else f"<b>Выключен</b> {E_CROSS}"
-    mod_desc = f"<b>Включена</b> {E_CHECK}" if is_mod else f"<b>Выключена</b> {E_CROSS}"
-    chat_desc = f"<b>Включен</b> {E_CHECK}" if is_chat else f"<b>Выключен</b> {E_CROSS}"
+    filter_status = "Включен" if is_filter else "Выключен"
+    filter_icon = E_CHECK if is_filter else E_CROSS
+    
+    mod_status = "Включена" if is_mod else "Выключена"
+    mod_icon = E_CHECK if is_mod else E_CROSS
+    
+    chat_status = "Включен" if is_chat else "Выключен"
+    chat_icon = E_CHECK if is_chat else E_CROSS
     
     text = (
-        f"{E_LOCK} <b>Настройки приватности и анонимного чата</b>\n\n"
-        f"• <b>Режим отображения подопечного:</b>\n  └ {mode_desc}\n\n"
-        f"• <b>Автофильтр деанонимизации:</b> {filter_desc}\n"
-        f"  <i>(блокирует вопросы про имя, пол, ключи, телефоны, ссылки)</i>\n\n"
-        f"• <b>Премодерация записок админом:</b> {mod_desc}\n"
-        f"  <i>(проверка записок администраторами перед отправкой)</i>\n\n"
-        f"• <b>Анонимный чат «Санта и Подопечный»:</b> {chat_desc}\n\n"
-        f"{E_STATS} <b>Статистика записок:</b>\n"
-        f"  ├ Отправлено: <b>{stats['sent']}</b>\n"
-        f"  ├ Одобрено: <b>{stats['approved']}</b>\n"
-        f"  └ Отклонено: <b>{stats['rejected']}</b>\n\n"
-        f"Нажимайте на кнопки ниже для переключения настроек в 1 клик:"
+        f"{E_LOCK} <b>Центр приватности и анонимного чата</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Управление видимостью участников, фильтрацией сообщений и анонимным общением.\n\n"
+        f"<b>1. Режим раскрытия подопечного:</b>\n"
+        f"• Текущий: <b>{mode_title}</b>\n"
+        f"• <i>{mode_expl}</i>\n\n"
+        f"<b>2. Автофильтр деанонимизации:</b> {filter_icon} <b>{filter_status}</b>\n"
+        f"• <i>Блокирует попытки раскрыть личность через вопросы (проверки на имя, пол, контакты, ссылки и упоминания).</i>\n\n"
+        f"<b>3. Премодерация записок:</b> {mod_icon} <b>{mod_status}</b>\n"
+        f"• <i>Каждый вопрос подопечному или ответ Санте сначала отправляется администраторам на проверку.</i>\n\n"
+        f"<b>4. Анонимный чат «Санта — Подопечный»:</b> {chat_icon} <b>{chat_status}</b>\n"
+        f"• <i>Позволяет участникам уточнять детали подарка через бота без раскрытия своей личности.</i>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{E_STATS} <b>Активность записок:</b>\n"
+        f"• Всего отправлено: <b>{stats['sent']}</b>\n"
+        f"• Одобрено админом: <b>{stats['approved']}</b>\n"
+        f"• Отклонено: <b>{stats['rejected']}</b>\n\n"
+        f"{E_INFO} <i>Нажимайте на кнопки ниже для мгновенного переключения настроек:</i>"
     )
     
     await callback.message.edit_text(
@@ -984,7 +998,7 @@ async def admin_anon_mode_cycle_handler(callback: CallbackQuery, state: FSMConte
     """Переключение режима раскрытия подопечного"""
     new_mode = await db.cycle_anonymity_mode()
     mode_titles = {
-        "code": "Строгий код подарка (#10001)",
+        "code": "Строгий код подарка",
         "name": "По имени (Классический)",
         "gender": "По полу (Парню/Девушке)"
     }

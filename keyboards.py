@@ -196,29 +196,29 @@ def get_admin_anonymity_keyboard(
     
     # 1. Режим раскрытия
     if anonymity_mode == "name":
-        mode_label = "Режим: По имени (Классика)"
+        mode_label = "Режим: По имени"
         mode_icon = emoji_id("user")
     elif anonymity_mode == "gender":
-        mode_label = "Режим: По полу (Парню/Девушке)"
+        mode_label = "Режим: По полу"
         mode_icon = emoji_id("user")
     else:
-        mode_label = "Режим: Код подарка (#10001)"
+        mode_label = "Режим: Код подарка"
         mode_icon = emoji_id("lock")
     keyboard.button(text=mode_label, callback_data="admin_anon_mode_cycle", icon_custom_emoji_id=mode_icon)
     
-    # 2. Фильтр стоп-слов
-    filter_label = "Фильтр стоп-слов: ВКЛ" if filter_enabled else "Фильтр стоп-слов: ВЫКЛ"
+    # 2. Фильтр деанонимизации
+    filter_label = "Автофильтр: ВКЛ" if filter_enabled else "Автофильтр: ВЫКЛ"
     filter_icon = emoji_id("check") if filter_enabled else emoji_id("cross")
     keyboard.button(text=filter_label, callback_data="admin_toggle_filter", icon_custom_emoji_id=filter_icon)
     
     # 3. Премодерация записок
-    mod_label = "Премодерация записок: ВКЛ" if moderation_enabled else "Премодерация записок: ВЫКЛ"
-    mod_icon = emoji_id("lock") if moderation_enabled else emoji_id("unlock")
+    mod_label = "Премодерация: ВКЛ" if moderation_enabled else "Премодерация: ВЫКЛ"
+    mod_icon = emoji_id("check") if moderation_enabled else emoji_id("cross")
     keyboard.button(text=mod_label, callback_data="admin_toggle_moderation", icon_custom_emoji_id=mod_icon)
     
     # 4. Анонимный чат
     chat_label = "Анонимный чат: ВКЛ" if chat_enabled else "Анонимный чат: ВЫКЛ"
-    chat_icon = emoji_id("new_message") if chat_enabled else emoji_id("cross")
+    chat_icon = emoji_id("check") if chat_enabled else emoji_id("cross")
     keyboard.button(text=chat_label, callback_data="admin_toggle_chat", icon_custom_emoji_id=chat_icon)
     
     # 5. Назад в админ-панель
