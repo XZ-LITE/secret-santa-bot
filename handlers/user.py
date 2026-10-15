@@ -32,11 +32,11 @@ from utils import (
     format_recipient_info_for_santa
 )
 from custom_emojis import (
-    E_USER, E_USERS, E_GIFT, E_GIFT_STAR, E_CHECK, E_CROSS,
+    E_USER, E_GIFT, E_GIFT_STAR, E_CHECK, E_CROSS,
     E_HOURGLASS, E_CLOCK, E_MONEY, E_PARTY, E_TAG, E_LOCK,
     E_EDIT, E_REPEAT, E_LINK, E_SPARKLES, E_STATS, E_WARNING,
     E_BELL, E_MESSAGE, E_FILE, E_SETTINGS, E_NEW_MESSAGE,
-    E_MAGIC, emoji_id
+    E_MAGIC, E_DICE, E_INFO, emoji_id
 )
 from services.notifications import notify_admins_registration_complete
 
@@ -156,61 +156,49 @@ async def process_display_name_for_existing_user(message: Message, state: FSMCon
     else:
         await message.answer(f"{E_CROSS} Произошла ошибка. Пожалуйста, попробуйте еще раз.", parse_mode="HTML")
 
+def format_help_text(time_left_msg: str, total_participants: int, is_command: bool = True) -> str:
+    """Формирует понятный и праздничный текст справки по игре"""
+    commands_block = (
+        f"{E_FILE} <b>Доступные команды:</b>\n"
+        f"• /start — Главное меню\n"
+        f"• /help — Справка и правила\n\n"
+    ) if is_command else ""
+    
+    return (
+        f"{E_GIFT} <b>Помощь по игре «Тайный Санта»</b>\n\n"
+        f"{time_left_msg}\n\n"
+        f"{commands_block}"
+        f"{E_SPARKLES} <b>Как устроена игра:</b>\n\n"
+        f"{E_EDIT} <b>1. Заполните анкету</b>\n"
+        f"Укажите своё имя и желанный подарок со ссылками — так Санта точно не ошибётся с выбором. В конце бот выдаст ваш личный секретный код.\n\n"
+        f"{E_DICE} <b>2. Тайная жеребьёвка</b>\n"
+        f"Когда сбор участников завершится, бот случайно и абсолютно тайно распределит подопечных среди всех игроков.\n\n"
+        f"{E_GIFT_STAR} <b>3. Подготовка подарка</b>\n"
+        f"Вы получите анкету вашего подопечного. Если нужно уточнить детали (размер, модель, цвет) — можно задать анонимный вопрос прямо через бота.\n\n"
+        f"{E_PARTY} <b>4. Праздничный обмен</b>\n"
+        f"Упакуйте подарок и подпишите на нём только секретный код подопечного (например, <code>#48291</code>). Все подарки собираются под ёлкой, а личность Санты остаётся сюрпризом!\n\n"
+        f"{E_INFO} <b>Правила и детали:</b>\n"
+        f"<blockquote>• Бюджет подарка: до <b>{GIFT_BUDGET} ₽</b>\n"
+        f"• Участников в игре: <b>{total_participants}</b>\n"
+        f"• Полная анонимность: всё в секрете до финала</blockquote>"
+    )
+
 @user_router.message(Command("help"))
 async def cmd_help(message: Message, state: FSMContext):
     """Показать справку по команде /help"""
     await state.clear()
-    is_open, time_left_msg = is_registration_open()
+    _, time_left_msg = is_registration_open()
     total_participants = await db.get_total_participants()
-    
-    help_text = (
-        f"{E_GIFT} <b>Помощь по игре «Тайный Санта»</b>\n\n"
-        f"{time_left_msg}\n\n"
-        f"{E_FILE} <b>Доступные команды:</b>\n"
-        f"• /start - Главное меню\n"
-        f"• /help - Справка и правила\n\n"
-        f"{E_SPARKLES} <b>Как это работает:</b>\n"
-        f"1. Нажмите «Принять участие» {E_GIFT}\n"
-        f"2. Получите секретный ключ {E_TAG}\n"
-        f"3. Укажите свой пол {E_USER}\n"
-        f"4. Введите ваше имя и фамилию\n"
-        f"5. Укажите желаемый подарок (до {GIFT_BUDGET} ₽) {E_MONEY}\n"
-        f"6. Пришлите ссылку(и) на подарок {E_LINK}\n"
-        f"7. Ждите, когда все зарегистрируются {E_HOURGLASS}\n"
-        f"8. Узнайте, кому дарить подарок! {E_PARTY}\n\n"
-        f"• Бюджет: до <b>{GIFT_BUDGET} ₽</b> {E_MONEY}\n"
-        f"• Участников: <b>{total_participants}</b> человек {E_USERS}\n"
-        f"• Полная анонимность: всё в секрете! {E_LOCK}"
-    )
+    help_text = format_help_text(time_left_msg, total_participants, is_command=True)
     await message.answer(help_text, reply_markup=get_help_keyboard(), parse_mode="HTML")
 
 @user_router.callback_query(F.data == "help")
 async def show_help(callback: CallbackQuery, state: FSMContext):
-    """Показать справку"""
+    """Показать справку через инлайн-кнопку"""
     await state.clear()
-    is_open, time_left_msg = is_registration_open()
+    _, time_left_msg = is_registration_open()
     total_participants = await db.get_total_participants()
-    
-    help_text = (
-        f"{E_GIFT} <b>Помощь по игре «Тайный Санта»</b>\n\n"
-        f"{time_left_msg}\n\n"
-        f"{E_FILE} <b>Доступные команды:</b>\n"
-        f"• /start - Главное меню\n"
-        f"• Нажмите кнопки ниже для навигации\n\n"
-        f"{E_SPARKLES} <b>Как это работает:</b>\n"
-        f"1. Нажмите «Принять участие» {E_GIFT}\n"
-        f"2. Получите секретный ключ {E_TAG}\n"
-        f"3. Укажите свой пол {E_USER}\n"
-        f"4. Введите ваше имя и фамилию\n"
-        f"5. Укажите желаемый подарок (до {GIFT_BUDGET} ₽) {E_MONEY}\n"
-        f"6. Пришлите ссылку(и) на подарок {E_LINK}\n"
-        f"7. Ждите, когда все зарегистрируются {E_HOURGLASS}\n"
-        f"8. Узнайте, кому дарить подарок! {E_PARTY}\n\n"
-        f"• Бюджет: до <b>{GIFT_BUDGET} ₽</b> {E_MONEY}\n"
-        f"• Участников: <b>{total_participants}</b> человек {E_USERS}\n"
-        f"• Полная анонимность: всё в секрете! {E_LOCK}"
-    )
-    
+    help_text = format_help_text(time_left_msg, total_participants, is_command=False)
     await callback.message.edit_text(help_text, reply_markup=get_help_keyboard(), parse_mode="HTML")
     await callback.answer()
 
