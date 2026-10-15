@@ -1096,7 +1096,7 @@ async def admin_distribution_menu(callback: CallbackQuery, state: FSMContext):
     is_distributed = await db.is_distribution_done()
     is_revealed = await db.is_reveal_done()
     
-    reveal_status_str = f"Да {E_CHECK}" if is_revealed else f"Ожидает финала {E_HOURGLASS}"
+    reveal_status_str = "Да" if is_revealed else "Ожидает финала"
     text = (
         f"{E_DICE} <b>Управление распределением</b>\n\n"
         f"{E_USERS} Зарегистрировано: <b>{count}/{total_participants}</b> участников\n"
@@ -1146,7 +1146,7 @@ async def admin_distribution_status(callback: CallbackQuery):
         f"{E_STATS} <b>Детальный статус распределения</b>\n\n"
         f"• Текущее состояние: <i>{distribution_status}</i>\n"
         f"• Зарегистрировано участников: <b>{len(users)}</b>\n"
-        f"• Распределение завершено: {'<b>Да</b> ' + E_CHECK if is_done else '<b>Нет</b> ' + E_HOURGLASS}\n"
+        f"• Распределение завершено: {'<b>Да</b>' if is_done else '<b>Нет</b>'}\n"
         f"• Осталось назначить дарителей: <b>{len(remaining_givers)}</b>\n"
         f"• Осталось получателей без подарка: <b>{len(remaining_receivers)}</b>"
     )
@@ -1333,7 +1333,7 @@ async def admin_manual_distribute_select_receiver(callback: CallbackQuery, state
         if await db.is_distribution_done():
             await callback.message.edit_text(
                 f"{E_CHECK} <b>Ручное распределение выполнено!</b>\n"
-                f"{E_USER} Даритель: <b>{giver_name}</b> → {E_GIFT} Получатель: <b>{receiver_name}</b>\n\n"
+                f"• Даритель: <b>{giver_name}</b> → Получатель: <b>{receiver_name}</b>\n\n"
                 f"{E_PARTY} <b>Все участники распределены!</b>",
                 reply_markup=get_admin_keyboard(),
                 parse_mode="HTML"
@@ -1343,7 +1343,7 @@ async def admin_manual_distribute_select_receiver(callback: CallbackQuery, state
             remaining_givers, remaining_receivers = await db.get_remaining_users_for_distribution()
             status_text = (
                 f"{E_CHECK} <b>Распределение сохранено!</b>\n"
-                f"{E_USER} <b>{giver_name}</b> → {E_GIFT} <b>{receiver_name}</b>\n\n"
+                f"• <b>{giver_name}</b> → <b>{receiver_name}</b>\n\n"
                 f"{E_STATS} Осталось: Дарителей <b>{len(remaining_givers)}</b>, Получателей <b>{len(remaining_receivers)}</b>"
             )
             keyboard = InlineKeyboardBuilder()
@@ -1368,7 +1368,7 @@ async def admin_manual_distribute_select_receiver(callback: CallbackQuery, state
             )
             if receiver_links and receiver_links != "Нет ссылки":
                 message += f"\n{E_LINK} Ссылки на подарки:\n{receiver_links}\n"
-            message += f"\n{E_MONEY} Бюджет: до <b>{GIFT_BUDGET} рублей</b>\n{E_SPARKLES} С наступающим Новым Годом!"
+            message += f"\n{E_MONEY} Бюджет: до <b>{GIFT_BUDGET} рублей</b>\n\n{E_SPARKLES} С наступающим Новым Годом!"
             
             notif_kb = InlineKeyboardBuilder()
             notif_kb.button(text="Спросить подопечного анонимно", callback_data="ask_receiver", icon_custom_emoji_id=emoji_id("new_message"))
@@ -1843,12 +1843,12 @@ async def admin_reveal_do(callback: CallbackQuery, bot: Bot):
             rec_text = ""
         
         reveal_msg = (
-            f"{E_PARTY} <b>ТАЙНА САНТЫ РАСКРЫТА!</b> {E_SPARKLES}\n\n"
+            f"{E_PARTY} <b>ТАЙНА САНТЫ РАСКРЫТА!</b>\n\n"
             f"{E_GIFT} <b>Вашим Тайным Сантой был(а):</b>\n"
-            f"{E_CROWN} <b>{santa_name}</b>! {E_PARTY}\n\n"
+            f"{E_CROWN} <b>{santa_name}</b>!\n\n"
             f"{rec_text}\n"
-            f"<i>Надеемся, подарки принесли вам море радости и новогоднего настроения! {E_PARTY}\n"
-            f"Счастливого Нового Года! {E_SPARKLES}</i>"
+            f"{E_SPARKLES} <i>Надеемся, подарки принесли вам море радости и новогоднего настроения!\n"
+            f"Счастливого Нового Года!</i>"
         )
         
         ok, _ = await send_message_safe(bot, uid, reveal_msg, parse_mode="HTML")
@@ -1866,7 +1866,7 @@ async def admin_reveal_do(callback: CallbackQuery, bot: Bot):
         f"{E_CHECK} <b>Тайна Санты успешно раскрыта!</b>\n\n"
         f"• Успешно уведомлено: <b>{success_count}</b> участников\n"
         f"• Не доставлено: <b>{fail_count}</b>\n\n"
-        f"Игра «Тайный Санта» успешно завершена! {E_PARTY}{E_SPARKLES}",
+        f"{E_PARTY} <b>Игра «Тайный Санта» успешно завершена!</b>",
         reply_markup=keyboard.as_markup(),
         parse_mode="HTML"
     )

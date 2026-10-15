@@ -12,10 +12,9 @@ from config import DB_PATH, GIFT_BUDGET
 
 from urllib.parse import urlparse
 from custom_emojis import (
-    E_USER, E_GIFT, E_GIFT_STAR, E_CHECK, E_CROSS,
-    E_HOURGLASS, E_MONEY, E_PARTY, E_TAG,
-    E_LOCK, E_EDIT, E_REPEAT, E_LINK, E_SPARKLES, E_STATS,
-    E_QUESTION, E_FILE
+    E_USER, E_GIFT, E_GIFT_STAR, E_CROSS,
+    E_HOURGLASS, E_PARTY, E_TAG,
+    E_LINK, E_STATS, E_FILE
 )
 
 def check_deanonymization_text(text: str) -> Optional[str]:
@@ -160,16 +159,16 @@ def format_admin_user_info(user_data: dict, user_id: str) -> str:
     
     gender_val = user_data.get('gender')
     if gender_val == 'male':
-        gender_str = f"Мужской {E_USER}"
+        gender_str = "Мужской"
     elif gender_val == 'female':
-        gender_str = f"Женский {E_USER}"
+        gender_str = "Женский"
     else:
-        gender_str = f"Не указан {E_QUESTION}"
+        gender_str = "Не указан"
 
     info.extend([
         f"• Пол: {gender_str}",
-        f"{E_EDIT} Изменений желания: {user_data.get('wish_changes', 0)}/3",
-        f"{E_REPEAT} Смена пола: Использована {E_CHECK}" if user_data.get('gender_changed', False) else f"{E_REPEAT} Смена пола: Доступна {E_CROSS}",
+        f"• Изменений желания: {user_data.get('wish_changes', 0)}/3",
+        "• Смена пола: Использована" if user_data.get('gender_changed', False) else "• Смена пола: Доступна",
     ])
     
     if user_data.get('gift_to_user_id'):
@@ -204,18 +203,18 @@ def format_admin_user_card(
     username_str = f"@{user_data['username']}" if user_data.get('username') else "не указан"
     key_str = f"#{user_data.get('key')}" if user_data.get('key') else "нет ключа"
     gender_val = user_data.get('gender')
-    gender_str = f"Мужской {E_USER}" if gender_val == "male" else (f"Женский {E_USER}" if gender_val == "female" else f"Не указан {E_QUESTION}")
+    gender_str = "Мужской" if gender_val == "male" else ("Женский" if gender_val == "female" else "Не указан")
     wish = html.escape(user_data.get('wish', 'Не указано'), quote=False)
     wish_links = format_wish_links(user_data.get('wish_link', ''))
     wish_changes = user_data.get('wish_changes', 0)
-    gender_changed = f"Использована {E_LOCK}" if user_data.get('gender_changed') else f"Доступна (1 раз) {E_CHECK}"
+    gender_changed = "использована" if user_data.get('gender_changed') else "доступна (1 раз)"
     
     text = (
         f"{E_USER} <b>Карточка участника</b>\n\n"
         f"• <b>Имя:</b> {display_name}\n"
         f"• <b>Telegram:</b> {username_str} (<code>ID: {user_id}</code>)\n"
-        f"• <b>Секретный ключ:</b> <code>{key_str}</code>\n"
-        f"• <b>Статус:</b> Зарегистрирован {E_CHECK}\n"
+        f"• <b>Секретный код подарка:</b> <code>{key_str}</code>\n"
+        f"• <b>Статус:</b> Зарегистрирован\n"
         f"• <b>Пол:</b> {gender_str}\n"
         f"• <b>Желание:</b> {wish}\n"
     )
@@ -231,7 +230,7 @@ def format_admin_user_card(
     # Информация о распределении (кому дарит и кто дарит ему)
     if user_data.get('gift_to_user_id'):
         gift_to_id = user_data['gift_to_user_id']
-        gift_to_gender = f"мужчине {E_USER}" if user_data.get('gift_to_gender') == "male" else f"женщине {E_USER}"
+        gift_to_gender = "мужчине" if user_data.get('gift_to_gender') == "male" else "женщине"
         gift_to_name = user_data.get('gift_to_name')
         if not gift_to_name and all_users and str(gift_to_id) in all_users:
             gift_to_name = all_users[str(gift_to_id)].get('display_name') or all_users[str(gift_to_id)].get('username')
@@ -321,12 +320,12 @@ def get_main_menu_text(
         key_str = f"#{user_key}" if user_key else "—"
         text = (
             f"{E_PARTY} Привет, <b>{first_name}</b>!\n"
-            f"Вы участвуете в игре «Тайный Санта»! {E_SPARKLES}\n\n"
-            f"{E_TAG} Ваш секретный ключ: <code>{key_str}</code>\n"
+            f"Вы участвуете в игре «Тайный Санта»!\n\n"
+            f"{E_TAG} Секретный код подарка: <code>{key_str}</code>\n"
             f"{E_STATS} Набор участников: <b>{registered_count}</b> из <b>{total_participants}</b>\n"
             f"   {progress}\n\n"
             f"{status_msg}\n\n"
-            f"{E_GIFT} Когда все участники соберутся, вам придёт уведомление с вишлистом вашего подопечного!"
+            f"{E_GIFT} Когда регистрация завершится, бот пришлёт вам вишлист вашего подопечного!"
         )
     else:
         text = (
@@ -336,9 +335,9 @@ def get_main_menu_text(
             f"   {progress}\n\n"
             f"{status_msg}\n\n"
             f"{E_FILE} <b>Правила игры:</b>\n"
-            f"• Бюджет подарка: до <b>{GIFT_BUDGET} ₽</b> {E_MONEY}\n"
-            f"• Полная тайна: никто не узнает своего Санту до финала! {E_LOCK}\n"
-            f"• Заполните короткую анкету и укажите желанный подарок. {E_EDIT}"
+            f"<blockquote>• Бюджет подарка: до <b>{GIFT_BUDGET} ₽</b>\n"
+            f"• Полная тайна: личность Санты остаётся секретом\n"
+            f"• Для участия нажмите кнопку «Принять участие»</blockquote>"
         )
     return text
 

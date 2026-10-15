@@ -225,8 +225,8 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
     
     total_participants = await db.get_total_participants()
     
-    gender_str = f"Мужской {E_USER}" if user_data.get('gender') == 'male' else f"Женский {E_USER}"
-    gender_status = f"Использована {E_CHECK}" if user_data.get('gender_changed') else "Доступна (1 раз)"
+    gender_str = "Мужской" if user_data.get('gender') == 'male' else "Женский"
+    gender_status = "Использована" if user_data.get('gender_changed') else "Доступна (1 раз)"
     
     display_name_safe = html.escape(user_data.get('display_name', 'Не указано'), quote=False)
     wish_safe = html.escape(user_data.get('wish', 'Не указано'), quote=False)
@@ -278,7 +278,7 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
                     text += f"• Ссылка на подарок: {formatted_rec}\n"
         text += (
             f"\n{E_MONEY} Бюджет: до <b>{GIFT_BUDGET} ₽</b>\n\n"
-            f"С наступающим Новым Годом! {E_PARTY}{E_SPARKLES}\n\n"
+            f"{E_SPARKLES} С наступающим Новым Годом!\n\n"
         )
         if await db.is_chat_enabled():
             text += f"{E_NEW_MESSAGE} <i>Вы можете задать подопечному анонимный вопрос кнопкой ниже!</i>"
@@ -480,19 +480,19 @@ async def _complete_registration(
     keyboard.button(text="В главное меню", callback_data="back_to_main", icon_custom_emoji_id=emoji_id("back"))
     keyboard.adjust(1)
     
-    gender_str = f"Мужской {E_USER}" if data['gender'] == 'male' else f"Женский {E_USER}"
+    gender_str = "Мужской" if data['gender'] == 'male' else "Женский"
     links_formatted = format_wish_links(links_text)
     
     display_name_safe = html.escape(display_name, quote=False)
     wish_safe = html.escape(data['wish'], quote=False)
     
     response_text = (
-        f"{E_CHECK} <b>Регистрация завершена, {display_name_safe}!</b> {E_PARTY}\n\n"
+        f"{E_CHECK} <b>Регистрация успешно завершена, {display_name_safe}!</b>\n\n"
         f"{E_FILE} <b>Ваша анкета:</b>\n"
-        f"{E_USER} Имя: {display_name_safe}\n"
-        f"{E_TAG} Секретный ключ: <code>#{data['key']}</code>\n"
+        f"• Имя: <b>{display_name_safe}</b>\n"
+        f"• Секретный код подарка: <code>#{data['key']}</code>\n"
         f"• Пол: {gender_str}\n"
-        f"{E_GIFT} Желание: «{wish_safe}»\n"
+        f"• Желание: «{wish_safe}»\n"
     )
     if links_text:
         response_text += f"{E_LINK} Ссылки: {links_formatted}\n\n"
@@ -568,7 +568,7 @@ async def back_to_wish_input(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     display_name = data.get("display_name", "пользователь")
     gender = data.get("gender", "неизвестно")
-    gender_text = f"Мужской {E_USER}" if gender == "male" else f"Женский {E_USER}"
+    gender_text = "Мужской" if gender == "male" else "Женский"
     
     await callback.message.edit_text(
         f"{E_USER} <b>Ваше имя:</b> {display_name}\n"
@@ -737,7 +737,7 @@ async def change_gender_menu(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Нельзя менять пол после распределения", show_alert=True)
         return
     
-    gender_text = f"Мужской {E_USER}" if user_data['gender'] == 'male' else f"Женский {E_USER}"
+    gender_text = "Мужской" if user_data['gender'] == 'male' else "Женский"
     text = (
         f"{E_REPEAT} <b>Изменение пола</b>\n\n"
         f"{E_USER} <b>Ваше имя:</b> {user_data.get('display_name', 'Не указано')}\n"
@@ -761,7 +761,7 @@ async def process_new_gender(callback: CallbackQuery, state: FSMContext):
     keyboard.adjust(1)
     
     if success:
-        gender_text = f"Мужской {E_USER}" if new_gender == "male" else f"Женский {E_USER}"
+        gender_text = "Мужской" if new_gender == "male" else "Женский"
         await callback.message.edit_text(
             f"{E_CHECK} <b>Пол успешно изменен!</b>\n• Новый пол: {gender_text}",
             reply_markup=keyboard.as_markup(),

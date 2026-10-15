@@ -8,8 +8,8 @@ from config import ADMIN_IDS, GIFT_BUDGET
 from utils import format_wish_links, format_recipient_info_for_santa, send_message_safe
 from database import Database
 from custom_emojis import (
-    E_CLOCK, E_BELL, E_GIFT, E_PARTY, E_SPARKLES,
-    E_MONEY, E_STATS, E_CROWN, E_LINK, emoji_id
+    E_CLOCK, E_BELL, E_PARTY, E_SPARKLES,
+    E_MONEY, E_STATS, E_CROWN, E_LINK, E_INFO, emoji_id
 )
 
 async def send_registration_reminders(bot: Bot, db: Database) -> int:
@@ -107,8 +107,8 @@ async def notify_all_participants(bot: Bot, db: Database):
         rec_info = format_recipient_info_for_santa(receiver_data, mode)
         
         message = (
-            f"{E_GIFT} <b>Внимание! Все участники зарегистрировались!</b>\n\n"
-            f"Распределение Тайного Санты завершено! {E_PARTY}{E_SPARKLES}\n\n"
+            f"{E_PARTY} <b>Распределение Тайного Санты завершено!</b>\n\n"
+            f"Все участники зарегистрировались, и бот определил вашего подопечного:\n\n"
             f"{rec_info}"
             f"• Желание получателя: <i>«{receiver_wish}»</i>\n"
         )
@@ -122,9 +122,11 @@ async def notify_all_participants(bot: Bot, db: Database):
             else:
                 message += f"\n{E_LINK} <b>Ссылка на подарок:</b> {receiver_links}\n"
         
-        message += f"\n{E_MONEY} <b>Бюджет:</b> до {GIFT_BUDGET} рублей\n"
-        message += "Не забудьте подписать подарок этим кодом при вручении!\n"
-        message += f"С наступающим Новым Годом! {E_PARTY}{E_SPARKLES}"
+        message += (
+            f"\n{E_MONEY} <b>Бюджет:</b> до {GIFT_BUDGET} рублей\n\n"
+            f"{E_INFO} <i>Не забудьте подписать подарок секретным кодом подопечного при вручении!</i>\n\n"
+            f"{E_SPARKLES} С наступающим Новым Годом!"
+        )
         
         notif_kb = InlineKeyboardBuilder()
         notif_kb.button(text="Спросить подопечного анонимно", callback_data="ask_receiver", icon_custom_emoji_id=emoji_id("new_message"))
