@@ -1,4 +1,5 @@
 import os
+import re
 import html
 import datetime
 import asyncio
@@ -817,7 +818,8 @@ async def admin_search_user_process(message: Message, state: FSMContext):
         if udata.get("registered", True):
             name = udata.get("display_name") or udata.get("username") or f"ID {uid}"
             key_str = f" #{udata.get('key')}" if udata.get("key") else ""
-            uname_str = f" (@{udata['username']})" if udata.get("username") and udata["username"] != name else ""
+            raw_u = (udata.get("username") or "").strip().lstrip('@')
+            uname_str = f" (@{raw_u})" if raw_u and re.match(r'^[a-zA-Z0-9_]{3,32}$', raw_u) and raw_u != name else ""
             btn_text = f"{name}{uname_str}{key_str}"
             btn_icon = emoji_id("user")
         else:

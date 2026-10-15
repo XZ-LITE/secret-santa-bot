@@ -279,6 +279,17 @@ class Database:
         await self._write_db(data)
     
     @serialize_mutations
+    async def update_username(self, user_id: int, username: str) -> bool:
+        """Обновляет Telegram @username пользователя"""
+        data = await self._read_db()
+        user_key = str(user_id)
+        if user_key in data.get("users", {}):
+            data["users"][user_key]["username"] = username or ""
+            await self._write_db(data)
+            return True
+        return False
+    
+    @serialize_mutations
     async def update_wish(self, user_id: int, new_wish: str, new_link: str) -> bool:
         """Обновляет желание пользователя"""
         data = await self._read_db()

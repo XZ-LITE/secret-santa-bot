@@ -200,7 +200,8 @@ def format_admin_user_card(
         )
     
     display_name = html.escape(user_data.get('display_name') or user_data.get('username') or f"ID {user_id}", quote=False)
-    username_str = f"@{user_data['username']}" if user_data.get('username') else "не указан"
+    raw_uname = (user_data.get('username') or "").strip().lstrip('@')
+    username_str = f"@{raw_uname}" if raw_uname and re.match(r'^[a-zA-Z0-9_]{3,32}$', raw_uname) else "не указан"
     key_str = f"#{user_data.get('key')}" if user_data.get('key') else "нет ключа"
     gender_val = user_data.get('gender')
     gender_str = "Мужской" if gender_val == "male" else ("Женский" if gender_val == "female" else "Не указан")

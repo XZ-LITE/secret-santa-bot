@@ -2,6 +2,7 @@ import re
 import html
 import uuid
 import datetime
+from typing import Optional
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -62,6 +63,11 @@ async def cmd_start(message: Message, state: FSMContext):
     user_data = None
     if is_registered:
         user_data = await db.get_user(message.from_user.id)
+        current_username = message.from_user.username or ""
+        if user_data and user_data.get("username") != current_username:
+            await db.update_username(message.from_user.id, current_username)
+            user_data["username"] = current_username
+            
         if not user_data.get('display_name'):
             await message.answer(
                 f"{E_USER} Пожалуйста, введите ваше имя и фамилию (как вас называть в классе):\n\n"
@@ -222,6 +228,11 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
         )
         await callback.answer()
         return
+    
+    current_username = callback.from_user.username or ""
+    if user_data.get("username") != current_username:
+        await db.update_username(callback.from_user.id, current_username)
+        user_data["username"] = current_username
     
     total_participants = await db.get_total_participants()
     
@@ -450,7 +461,7 @@ async def back_to_gender_choice(callback: CallbackQuery, state: FSMContext):
 
 async def _complete_registration(
     user_id: int,
-    user_full_name: str,
+    username: Optional[str],
     first_name: str,
     links_text: str,
     state: FSMContext,
@@ -463,7 +474,7 @@ async def _complete_registration(
     
     await db.add_user(
         user_id=user_id,
-        username=user_full_name,
+        username=username or "",
         gender=data["gender"],
         wish=data["wish"],
         wish_link=links_text,
@@ -536,7 +547,7 @@ async def process_wish_link(message: Message, state: FSMContext, bot: Bot):
     
     await _complete_registration(
         user_id=message.from_user.id,
-        user_full_name=message.from_user.full_name,
+        username=message.from_user.username,
         first_name=message.from_user.first_name,
         links_text=links_text,
         state=state,
@@ -550,7 +561,7 @@ async def skip_wish_link_callback(callback: CallbackQuery, state: FSMContext, bo
     await callback.answer()
     await _complete_registration(
         user_id=callback.from_user.id,
-        user_full_name=callback.from_user.full_name,
+        username=callback.from_user.username,
         first_name=callback.from_user.first_name,
         links_text="",
         state=state,
