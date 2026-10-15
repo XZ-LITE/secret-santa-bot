@@ -37,7 +37,8 @@ from keyboards import (
     get_distribution_confirmation_keyboard,
     get_admin_users_list_keyboard,
     get_admin_user_card_keyboard,
-    get_admin_user_del_confirm_keyboard
+    get_admin_user_del_confirm_keyboard,
+    get_broadcast_preview_keyboard
 )
 from utils import (
     is_registration_open,
@@ -52,7 +53,7 @@ from custom_emojis import (
     E_EDIT, E_LINK, E_SPARKLES, E_STATS, E_WARNING,
     E_BELL, E_MESSAGE, E_INFO, E_FILE, E_ARCHIVE, E_TARGET,
     E_CROWN, E_DICE, E_PUZZLE, E_MEGAPHONE, E_BROADCAST, E_SETTINGS,
-    E_ADD_USER, E_SEARCH, E_LOCK, emoji_id
+    E_ADD_USER, E_SEARCH, E_LOCK, emoji_id, render_text_with_custom_emojis
 )
 from services.notifications import notify_all_participants
 
@@ -610,7 +611,10 @@ async def admin_user_msg_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         f"{E_MESSAGE} <b>Личное сообщение участнику</b>\n\n"
         f"Получатель: <b>{name}</b> (<code>ID: {uid}</code>)\n\n"
-        f"Введите текст сообщения, которое бот передаст участнику в ЛС:",
+        f"Отправьте текст сообщения или <b>фотографию с подписью</b>:\n\n"
+        f"<blockquote>• Премиум эмодзи: выберите в клавиатуре или укажите шорткод (например, <code>:gift:</code>, <code>:party:</code>, <code>:star:</code>, <code>:bell:</code>)\n"
+        f"• Форматирование: жирный, курсив, цитаты, спойлеры\n"
+        f"• Перед отправкой будет доступен предпросмотр</blockquote>",
         reply_markup=keyboard.as_markup(),
         parse_mode="HTML"
     )
@@ -618,8 +622,8 @@ async def admin_user_msg_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @admin_router.message(AdminDirectMessage.entering_message)
-async def admin_user_msg_send(message: Message, state: FSMContext, bot: Bot):
-    """Отправка личного сообщения участнику"""
+async def admin_user_msg_send(message: Message, state: FSMContext):
+    """Предпросмотр личного сообщения участнику"""
     state_data = await state.get_data()
     uid = state_data.get("target_user_id")
     name = state_data.get("target_user_name", f"ID {uid}")
@@ -629,30 +633,16 @@ async def admin_user_msg_send(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
         return
     
-    text_to_send = (
-        f"{E_MESSAGE} <b>Сообщение от организатора Тайного Санты:</b>\n\n"
-        f"{html.escape(message.text, quote=False)}"
+    await prepare_and_show_broadcast_preview(
+        message=message,
+        state=state,
+        recipient_ids=[int(uid)],
+        target_desc=f"{name} (ID: {uid})",
+        header=f"{E_MESSAGE} <b>Личное сообщение от организатора Тайного Санты:</b>",
+        cancel_callback=f"admin_user_view_{uid}",
+        back_state=AdminDirectMessage.entering_message
     )
-    success, _ = await send_message_safe(bot, uid, text_to_send, parse_mode="HTML")
-    await state.clear()
-    
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Вернуться к карточке", callback_data=f"admin_user_view_{uid}", icon_custom_emoji_id=emoji_id("user"))
-    keyboard.button(text="Список участников", callback_data="admin_users_list", icon_custom_emoji_id=emoji_id("users"))
-    keyboard.adjust(1)
-    
-    if success:
-        await message.answer(
-            f"{E_CHECK} Сообщение успешно доставлено участнику <b>{name}</b>!",
-            reply_markup=keyboard.as_markup(),
-            parse_mode="HTML"
-        )
-    else:
-        await message.answer(
-            f"{E_CROSS} Не удалось отправить сообщение участнику (возможно, он заблокировал бота).",
-            reply_markup=keyboard.as_markup(),
-            parse_mode="HTML"
-        )
+    await state.set_state(AdminDirectMessage.confirming)
 
 @admin_router.callback_query(F.data.startswith("admin_user_del_confirm_"))
 async def admin_user_del_confirm(callback: CallbackQuery):
@@ -1397,11 +1387,105 @@ async def admin_reset_distribution(callback: CallbackQuery):
         await callback.message.edit_text(f"{E_CROSS} Не удалось сбросить распределение", reply_markup=keyboard.as_markup(), parse_mode="HTML")
     await callback.answer()
 
+async def prepare_and_show_broadcast_preview(
+    message: Message,
+    state: FSMContext,
+    recipient_ids: list,
+    target_desc: str,
+    header: str,
+    cancel_callback: str,
+    back_state
+):
+    """Формирует и отправляет карточку предпросмотра рассылки администратору"""
+    if message.photo:
+        raw_html = message.html_caption or ""
+        photo_id = message.photo[-1].file_id
+    else:
+        raw_html = message.html_text or ""
+        photo_id = None
+
+    if not raw_html and not photo_id:
+        await message.answer(
+            f"{E_WARNING} Пожалуйста, отправьте текст сообщения или фотографию с описанием.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Проверка лимитов длины Telegram
+    if photo_id and len(raw_html) > 1024:
+        await message.answer(
+            f"{E_CROSS} Подпись к фотографии слишком длинная ({len(raw_html)}/1024 симв.). Пожалуйста, сократите текст.",
+            parse_mode="HTML"
+        )
+        return
+    elif not photo_id and len(raw_html) > 4000:
+        await message.answer(
+            f"{E_CROSS} Сообщение слишком длинное ({len(raw_html)}/4000 симв.). Пожалуйста, сократите текст.",
+            parse_mode="HTML"
+        )
+        return
+
+    rendered_body = render_text_with_custom_emojis(raw_html)
+    final_message_text = f"{header}\n\n{rendered_body}" if header else rendered_body
+
+    await state.update_data(
+        broadcast_recipient_ids=recipient_ids,
+        broadcast_final_text=final_message_text,
+        broadcast_photo_id=photo_id,
+        broadcast_target_desc=target_desc,
+        broadcast_cancel_callback=cancel_callback,
+        broadcast_back_state=back_state
+    )
+
+    caption_preview = (
+        f"{E_SEARCH} <b>Предпросмотр сообщения для получателей:</b>\n"
+        f"<blockquote><b>Кому:</b> {target_desc} ({len(recipient_ids)} чел.)</blockquote>\n\n"
+        f"{final_message_text}"
+    )
+
+    preview_kb = get_broadcast_preview_keyboard(cancel_callback)
+
+    if photo_id:
+        if len(caption_preview) <= 1024:
+            await message.answer_photo(
+                photo=photo_id,
+                caption=caption_preview,
+                reply_markup=preview_kb,
+                parse_mode="HTML"
+            )
+        else:
+            await message.answer_photo(
+                photo=photo_id,
+                caption=final_message_text[:1024],
+                parse_mode="HTML"
+            )
+            await message.answer(
+                f"{E_SEARCH} <b>Предпросмотр:</b>\n<blockquote><b>Кому:</b> {target_desc} ({len(recipient_ids)} чел.)</blockquote>",
+                reply_markup=preview_kb,
+                parse_mode="HTML"
+            )
+    else:
+        await message.answer(
+            caption_preview,
+            reply_markup=preview_kb,
+            parse_mode="HTML"
+        )
+
 @admin_router.callback_query(F.data == "admin_notify_all")
 async def admin_notify_all_menu(callback: CallbackQuery, state: FSMContext):
     """Уведомление зарегистрированных участников"""
+    users = await db.get_all_users()
+    if not users:
+        await callback.answer("Нет зарегистрированных участников", show_alert=True)
+        return
+        
     await callback.message.edit_text(
-        f"{E_MEGAPHONE} Введите сообщение для <b>ВСЕХ ЗАРЕГИСТРИРОВАННЫХ</b> участников:",
+        f"{E_MEGAPHONE} <b>Рассылка зарегистрированным участникам</b>\n\n"
+        f"Получателей: <b>{len(users)}</b> чел.\n\n"
+        f"Отправьте текст сообщения или <b>фотографию с подписью</b>:\n\n"
+        f"<blockquote>• Премиум эмодзи: выберите в клавиатуре или укажите шорткод (например, <code>:gift:</code>, <code>:party:</code>, <code>:star:</code>, <code>:bell:</code>)\n"
+        f"• Форматирование: жирный, курсив, цитаты, спойлеры\n"
+        f"• Перед отправкой будет доступен предпросмотр</blockquote>",
         reply_markup=get_back_keyboard("admin_broadcasts_menu"),
         parse_mode="HTML"
     )
@@ -1409,50 +1493,41 @@ async def admin_notify_all_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @admin_router.message(AdminNotifyAll.entering_message)
-async def admin_notify_all_process(message: Message, state: FSMContext, bot: Bot):
-    """Отправка сообщения зарегистрированным участникам"""
+async def admin_notify_all_process(message: Message, state: FSMContext):
+    """Предпросмотр сообщения для зарегистрированных участников"""
     users = await db.get_all_users()
     if not users:
         await message.answer(f"{E_CROSS} Нет зарегистрированных участников", parse_mode="HTML")
         await state.clear()
         return
     
-    success_count = 0
-    fail_count = 0
-    broadcast_text = html.escape(message.text, quote=False)
-    for uid_str in users.keys():
-        success, _ = await send_message_safe(
-            bot,
-            int(uid_str),
-            f"{E_MEGAPHONE} <b>Сообщение от администратора Тайного Санты:</b>\n\n{broadcast_text}",
-            parse_mode="HTML"
-        )
-        if success:
-            success_count += 1
-        else:
-            fail_count += 1
-        await asyncio.sleep(0.05)
-    
-    await message.answer(
-        f"{E_CHECK} <b>Уведомления отправлены!</b>\n• Успешно: <b>{success_count}</b>\n• Ошибок: <b>{fail_count}</b>",
-        parse_mode="HTML"
+    recipient_ids = [int(uid) for uid in users.keys()]
+    await prepare_and_show_broadcast_preview(
+        message=message,
+        state=state,
+        recipient_ids=recipient_ids,
+        target_desc="Все зарегистрированные участники",
+        header=f"{E_MEGAPHONE} <b>Сообщение от организаторов Тайного Санты:</b>",
+        cancel_callback="admin_broadcasts_menu",
+        back_state=AdminNotifyAll.entering_message
     )
-    await state.clear()
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Назад", icon_custom_emoji_id=emoji_id("back"), callback_data="admin_broadcasts_menu")
-    await message.answer("Выберите действие:", reply_markup=keyboard.as_markup())
+    await state.set_state(AdminNotifyAll.confirming)
 
 @admin_router.callback_query(F.data == "admin_notify_all_users")
 async def admin_notify_all_users_menu(callback: CallbackQuery, state: FSMContext):
     """Уведомление всех пользователей из списка доступа"""
     allowed_users = await db.get_allowed_users()
     if not allowed_users:
-        await callback.message.edit_text(f"{E_CROSS} Нет пользователей в списке доступа", reply_markup=get_back_keyboard("admin_broadcasts_menu"), parse_mode="HTML")
-        await callback.answer()
+        await callback.answer("Нет пользователей в списке доступа", show_alert=True)
         return
     
     await callback.message.edit_text(
-        f"{E_BROADCAST} Введите сообщение для всех <b>{len(allowed_users)}</b> пользователей из списка доступа:",
+        f"{E_BROADCAST} <b>Рассылка по списку доступа</b>\n\n"
+        f"Получателей: <b>{len(allowed_users)}</b> чел. (включая незарегистрированных)\n\n"
+        f"Отправьте текст сообщения или <b>фотографию с подписью</b>:\n\n"
+        f"<blockquote>• Премиум эмодзи: выберите в клавиатуре или укажите шорткод (например, <code>:gift:</code>, <code>:party:</code>, <code>:star:</code>, <code>:bell:</code>)\n"
+        f"• Форматирование: жирный, курсив, цитаты, спойлеры\n"
+        f"• Перед отправкой будет доступен предпросмотр</blockquote>",
         reply_markup=get_back_keyboard("admin_broadcasts_menu"),
         parse_mode="HTML"
     )
@@ -1460,34 +1535,24 @@ async def admin_notify_all_users_menu(callback: CallbackQuery, state: FSMContext
     await callback.answer()
 
 @admin_router.message(AdminNotifyAllUsers.entering_message)
-async def admin_notify_all_users_process(message: Message, state: FSMContext, bot: Bot):
-    """Отправка сообщения всем пользователям из списка доступа"""
+async def admin_notify_all_users_process(message: Message, state: FSMContext):
+    """Предпросмотр сообщения для всех пользователей из списка доступа"""
     allowed_users = await db.get_allowed_users()
-    success_count = 0
-    fail_count = 0
-    broadcast_text = html.escape(message.text, quote=False)
+    if not allowed_users:
+        await message.answer(f"{E_CROSS} Нет пользователей в списке доступа", parse_mode="HTML")
+        await state.clear()
+        return
     
-    for uid in allowed_users:
-        success, _ = await send_message_safe(
-            bot,
-            uid,
-            f"{E_BROADCAST} <b>Сообщение от администратора Тайного Санты:</b>\n\n{broadcast_text}",
-            parse_mode="HTML"
-        )
-        if success:
-            success_count += 1
-        else:
-            fail_count += 1
-        await asyncio.sleep(0.05)
-    
-    await message.answer(
-        f"{E_CHECK} <b>Рассылка завершена:</b>\n• Отправлено: <b>{success_count}</b>\n• Не удалось: <b>{fail_count}</b>",
-        parse_mode="HTML"
+    await prepare_and_show_broadcast_preview(
+        message=message,
+        state=state,
+        recipient_ids=allowed_users,
+        target_desc="Все пользователи из списка доступа",
+        header=f"{E_BROADCAST} <b>Сообщение от организаторов Тайного Санты:</b>",
+        cancel_callback="admin_broadcasts_menu",
+        back_state=AdminNotifyAllUsers.entering_message
     )
-    await state.clear()
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Назад", icon_custom_emoji_id=emoji_id("back"), callback_data="admin_broadcasts_menu")
-    await message.answer("Выберите действие:", reply_markup=keyboard.as_markup())
+    await state.set_state(AdminNotifyAllUsers.confirming)
 
 @admin_router.callback_query(F.data == "admin_notify_selected")
 async def admin_notify_selected_menu(callback: CallbackQuery, state: FSMContext):
@@ -1501,7 +1566,8 @@ async def admin_notify_selected_menu(callback: CallbackQuery, state: FSMContext)
     
     await state.update_data(selected_users=[], users=users)
     await callback.message.edit_text(
-        f"{E_MESSAGE} Выберите пользователей для отправки сообщения:",
+        f"{E_MESSAGE} <b>Выберите пользователей для рассылки:</b>\n\n"
+        f"Нажимайте на кнопки участников, чтобы отметить получателей:",
         reply_markup=get_multi_select_keyboard(users, [], "admin_broadcasts_menu"),
         parse_mode="HTML"
     )
@@ -1523,7 +1589,8 @@ async def admin_notify_selected_toggle(callback: CallbackQuery, state: FSMContex
     
     await state.update_data(selected_users=selected_users)
     await callback.message.edit_text(
-        f"{E_MESSAGE} <b>Выберите пользователей:</b>\n\n{E_CHECK} Выбрано: <b>{len(selected_users)}</b> чел.",
+        f"{E_MESSAGE} <b>Выберите пользователей для рассылки:</b>\n\n"
+        f"{E_CHECK} Отмечено получателей: <b>{len(selected_users)}</b> чел.",
         reply_markup=get_multi_select_keyboard(users, selected_users, "admin_broadcasts_menu"),
         parse_mode="HTML"
     )
@@ -1539,7 +1606,12 @@ async def admin_notify_selected_continue(callback: CallbackQuery, state: FSMCont
         return
     
     await callback.message.edit_text(
-        f"{E_MESSAGE} Выбрано <b>{len(selected_users)}</b> пользователей.\nВведите сообщение для отправки:",
+        f"{E_MESSAGE} <b>Рассылка выбранным участникам</b>\n\n"
+        f"Получателей: <b>{len(selected_users)}</b> чел.\n\n"
+        f"Отправьте текст сообщения или <b>фотографию с подписью</b>:\n\n"
+        f"<blockquote>• Премиум эмодзи: выберите в клавиатуре или укажите шорткод (например, <code>:gift:</code>, <code>:party:</code>, <code>:star:</code>, <code>:bell:</code>)\n"
+        f"• Форматирование: жирный, курсив, цитаты, спойлеры\n"
+        f"• Перед отправкой будет доступен предпросмотр</blockquote>",
         reply_markup=get_back_keyboard("admin_notify_selected"),
         parse_mode="HTML"
     )
@@ -1547,19 +1619,57 @@ async def admin_notify_selected_continue(callback: CallbackQuery, state: FSMCont
     await callback.answer()
 
 @admin_router.message(AdminNotifySelected.entering_message)
-async def admin_notify_selected_process(message: Message, state: FSMContext, bot: Bot):
-    """Отправка сообщения выбранным пользователям"""
+async def admin_notify_selected_process(message: Message, state: FSMContext):
+    """Предпросмотр сообщения для выбранных пользователей"""
     state_data = await state.get_data()
     selected_users = state_data.get("selected_users", [])
+    if not selected_users:
+        await message.answer(f"{E_CROSS} Список получателей пуст", parse_mode="HTML")
+        await state.clear()
+        return
+    
+    recipient_ids = [int(uid) for uid in selected_users]
+    await prepare_and_show_broadcast_preview(
+        message=message,
+        state=state,
+        recipient_ids=recipient_ids,
+        target_desc="Выбранные участники",
+        header=f"{E_MESSAGE} <b>Сообщение от организаторов Тайного Санты:</b>",
+        cancel_callback="admin_notify_selected",
+        back_state=AdminNotifySelected.entering_message
+    )
+    await state.set_state(AdminNotifySelected.confirming)
+
+@admin_router.callback_query(F.data == "broadcast_confirm_send")
+async def broadcast_confirm_send_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    """Подтверждение и запуск отправки рассылки / личного сообщения"""
+    state_data = await state.get_data()
+    recipient_ids = state_data.get("broadcast_recipient_ids", [])
+    final_text = state_data.get("broadcast_final_text", "")
+    photo_id = state_data.get("broadcast_photo_id")
+    cancel_callback = state_data.get("broadcast_cancel_callback", "admin_broadcasts_menu")
+
+    if not recipient_ids or (not final_text and not photo_id):
+        await callback.answer("Данные рассылки устарели или не найдены", show_alert=True)
+        await state.clear()
+        return
+
+    await callback.answer()
+
+    status_msg = await callback.message.answer(
+        f"{E_HOURGLASS} <b>Выполняется отправка сообщений...</b>\n\n"
+        f"Получателей: <b>{len(recipient_ids)}</b> чел. Пожалуйста, подождите.",
+        parse_mode="HTML"
+    )
+
     success_count = 0
     fail_count = 0
-    broadcast_text = html.escape(message.text, quote=False)
-    
-    for uid_str in selected_users:
+    for uid in recipient_ids:
         success, _ = await send_message_safe(
             bot,
-            int(uid_str),
-            f"{E_MESSAGE} <b>Сообщение от администратора Тайного Санты:</b>\n\n{broadcast_text}",
+            uid,
+            text=final_text,
+            photo=photo_id,
             parse_mode="HTML"
         )
         if success:
@@ -1567,15 +1677,46 @@ async def admin_notify_selected_process(message: Message, state: FSMContext, bot
         else:
             fail_count += 1
         await asyncio.sleep(0.05)
-    
-    await message.answer(
-        f"{E_CHECK} <b>Уведомления отправлены!</b>\n• Успешно: <b>{success_count}</b>\n• Ошибок: <b>{fail_count}</b>",
+
+    await state.clear()
+
+    keyboard = InlineKeyboardBuilder()
+    if cancel_callback.startswith("admin_user_view_"):
+        uid = cancel_callback.replace("admin_user_view_", "")
+        keyboard.button(text="К карточке участника", callback_data=f"admin_user_view_{uid}", icon_custom_emoji_id=emoji_id("user"))
+        keyboard.button(text="Список участников", callback_data="admin_users_list", icon_custom_emoji_id=emoji_id("users"))
+        keyboard.adjust(1)
+    else:
+        keyboard.button(text="В центр рассылок", callback_data="admin_broadcasts_menu", icon_custom_emoji_id=emoji_id("back"))
+
+    await status_msg.edit_text(
+        f"{E_CHECK} <b>Рассылка успешно завершена!</b>\n\n"
+        f"<blockquote>• Успешно доставлено: <b>{success_count}</b>\n"
+        f"• Ошибок / заблокировали бота: <b>{fail_count}</b>\n"
+        f"• Всего получателей: <b>{len(recipient_ids)}</b></blockquote>",
+        reply_markup=keyboard.as_markup(),
         parse_mode="HTML"
     )
-    await state.clear()
-    keyboard = InlineKeyboardBuilder()
-    keyboard.button(text="Назад", icon_custom_emoji_id=emoji_id("back"), callback_data="admin_broadcasts_menu")
-    await message.answer("Выберите действие:", reply_markup=keyboard.as_markup())
+
+@admin_router.callback_query(F.data == "broadcast_edit_text")
+async def broadcast_edit_text_handler(callback: CallbackQuery, state: FSMContext):
+    """Возврат к редактированию текста/фото рассылки"""
+    state_data = await state.get_data()
+    back_state = state_data.get("broadcast_back_state")
+    cancel_callback = state_data.get("broadcast_cancel_callback", "admin_broadcasts_menu")
+    target_desc = state_data.get("broadcast_target_desc", "")
+
+    if back_state:
+        await state.set_state(back_state)
+
+    await callback.message.answer(
+        f"{E_EDIT} <b>Редактирование сообщения</b>\n\n"
+        f"Кому: <b>{target_desc}</b>\n\n"
+        f"Отправьте новый текст сообщения или фотографию с подписью:",
+        reply_markup=get_back_keyboard(cancel_callback),
+        parse_mode="HTML"
+    )
+    await callback.answer()
 
 @admin_router.callback_query(F.data == "admin_remind")
 async def admin_remind(callback: CallbackQuery, bot: Bot):

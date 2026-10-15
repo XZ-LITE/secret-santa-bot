@@ -274,3 +274,13 @@ def get_distribution_confirmation_keyboard():
     keyboard.button(text="Нет, продолжить ручное распределение", callback_data="admin_manual_distribute", icon_custom_emoji_id=emoji_id("puzzle"))
     keyboard.adjust(1)
     return keyboard.as_markup()
+
+def get_broadcast_preview_keyboard(cancel_callback: str = "admin_broadcasts_menu"):
+    """Клавиатура предпросмотра рассылки / личного сообщения"""
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Отправить сообщение", callback_data="broadcast_confirm_send", icon_custom_emoji_id=emoji_id("broadcast"))
+    keyboard.button(text="Изменить сообщение", callback_data="broadcast_edit_text", icon_custom_emoji_id=emoji_id("edit"))
+    keyboard.button(text="Отмена", callback_data=cancel_callback, icon_custom_emoji_id=emoji_id("cross"))
+    keyboard.adjust(1)
+    return keyboard.as_markup()
+

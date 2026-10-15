@@ -347,27 +347,46 @@ async def send_message_safe(
     chat_id: int,
     text: str,
     reply_markup=None,
-    parse_mode=None
+    parse_mode=None,
+    photo: Optional[str] = None
 ) -> Tuple[bool, Optional[str]]:
-    """Безопасная отправка сообщения с обработкой лимитов и блокировок Telegram"""
+    """Безопасная отправка сообщения (текст или фото с подписью) с обработкой лимитов и блокировок Telegram"""
     try:
-        await target_bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode
-        )
-        return True, None
-    except TelegramRetryAfter as e:
-        logging.warning("Flood control: ожидание %s сек для %s", e.retry_after, chat_id)
-        await asyncio.sleep(e.retry_after)
-        try:
+        if photo:
+            await target_bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+        else:
             await target_bot.send_message(
                 chat_id=chat_id,
                 text=text,
                 reply_markup=reply_markup,
                 parse_mode=parse_mode
             )
+        return True, None
+    except TelegramRetryAfter as e:
+        logging.warning("Flood control: ожидание %s сек для %s", e.retry_after, chat_id)
+        await asyncio.sleep(e.retry_after)
+        try:
+            if photo:
+                await target_bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+            else:
+                await target_bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
             return True, None
         except Exception as retry_err:
             return False, str(retry_err)

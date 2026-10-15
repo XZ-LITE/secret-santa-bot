@@ -77,6 +77,7 @@ EMOJI_DATA: Dict[str, Tuple[str, str]] = {
 # Поиск возможен по: slug ("gift"), русскому названию ("Подарок"), или напрямую по ID ("6032644646587338669")
 ALL_EMOJIS_BY_ID: Dict[str, Tuple[str, str]] = {}
 ALL_EMOJIS_BY_NAME: Dict[str, Tuple[str, str]] = {}
+ALL_EMOJIS_BY_CHAR: Dict[str, Tuple[str, str]] = {}
 
 def _load_all_emojis():
     possible_paths = [
@@ -109,8 +110,15 @@ def _load_all_emojis():
                         emo, title = "", text_part
                     ALL_EMOJIS_BY_ID[eid] = (emo, title)
                     ALL_EMOJIS_BY_NAME[title.strip().lower()] = (emo, eid)
+                    if emo and emo.strip():
+                        ALL_EMOJIS_BY_CHAR[emo.strip()] = (emo.strip(), eid)
     except Exception:
         pass
+
+    # Основные алиасы имеют высший приоритет для замены символов
+    for key, (emo, eid) in EMOJI_DATA.items():
+        if emo and emo.strip():
+            ALL_EMOJIS_BY_CHAR[emo.strip()] = (emo.strip(), eid)
 
 _load_all_emojis()
 
@@ -169,6 +177,54 @@ def emoji_tag(name_or_id: str, fallback: Optional[str] = None) -> str:
         fb = "✨"
         
     return f'<tg-emoji emoji-id="{eid}">{fb}</tg-emoji>'
+
+def render_text_with_custom_emojis(html_text: str) -> str:
+    """Обрабатывает HTML-текст сообщения для рассылок и уведомлений:
+    1. Сохраняет существующие теги разметки (<b>, <i>, <code>, <a>, <blockquote>)
+    2. Сохраняет нативные кастомные эмодзи Telegram (<tg-emoji emoji-id="...">...</tg-emoji>)
+    3. Преобразует шорткоды :код: (например, :gift:, :party:, :подарок:, :6032644646587338669:) в <tg-emoji>
+    4. Преобразует стандартные юникод-эмодзи в премиум-эмодзи из пака, если есть соответствие
+    """
+    if not html_text:
+        return ""
+        
+    tokens = re.split(r'(<tg-emoji[^>]*>.*?</tg-emoji>|<[^>]+>)', html_text, flags=re.DOTALL)
+    out = []
+    
+    for token in tokens:
+        if not token:
+            continue
+        # HTML-тег или готовый блок <tg-emoji> оставляем без изменений
+        if token.startswith('<') and token.endswith('>'):
+            out.append(token)
+            continue
+            
+        res = token
+        
+        # 1. Замена шорткодов :код: / :название: / :id:
+        def repl_sc(m):
+            code = m.group(1).strip()
+            tag = emoji_tag(code)
+            return tag if tag else m.group(0)
+            
+        res = re.sub(r':([a-zA-Z0-9_\u0400-\u04FF\s\-]+):', repl_sc, res)
+        
+        # 2. Преобразование обычных юникод-эмодзи в кастомные премиум-эмодзи
+        sub_tokens = re.split(r'(<tg-emoji[^>]*>.*?</tg-emoji>)', res, flags=re.DOTALL)
+        rendered_sub = []
+        for st in sub_tokens:
+            if st.startswith('<tg-emoji') and st.endswith('</tg-emoji>'):
+                rendered_sub.append(st)
+            else:
+                s = st
+                for emo_char, (fallback, eid) in sorted(ALL_EMOJIS_BY_CHAR.items(), key=lambda x: len(x[0]), reverse=True):
+                    if emo_char in s:
+                        s = s.replace(emo_char, f'<tg-emoji emoji-id="{eid}">{fallback}</tg-emoji>')
+                rendered_sub.append(s)
+                
+        out.append("".join(rendered_sub))
+        
+    return "".join(out)
 
 # Предопределённые премиум константы для текста сообщений (HTML)
 E_GIFT = emoji_tag("gift")

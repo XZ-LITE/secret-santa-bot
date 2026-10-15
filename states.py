@@ -40,9 +40,11 @@ class AdminSetDeadline(StatesGroup):
 
 class AdminNotifyAll(StatesGroup):
     entering_message = State()
+    confirming = State()
 
 class AdminNotifyAllUsers(StatesGroup):
     entering_message = State()
+    confirming = State()
 
 class AdminEditDisplayName(StatesGroup):
     entering_user_id = State()
@@ -55,6 +57,7 @@ class AdminManualDistribution(StatesGroup):
 class AdminNotifySelected(StatesGroup):
     selecting_users = State()
     entering_message = State()
+    confirming = State()
 
 class AdminResetUserChanges(StatesGroup):
     entering_user_id = State()
@@ -62,4 +65,6 @@ class AdminResetUserChanges(StatesGroup):
 
 class AdminDirectMessage(StatesGroup):
     entering_message = State()
+    confirming = State()
+
 
