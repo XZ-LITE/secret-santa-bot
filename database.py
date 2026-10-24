@@ -60,7 +60,6 @@ class Database:
                 if not isinstance(data.get("settings"), dict):
                     data["settings"] = {}
                 data["settings"].setdefault("total_participants", 20)
-                data["settings"].setdefault("registration_open", True)
                 data["settings"].setdefault("anonymity_mode", "code")
                 data["settings"].setdefault("filter_enabled", True)
                 data["settings"].setdefault("moderation_enabled", True)
@@ -86,6 +85,7 @@ class Database:
                 data.setdefault("access_requests", {})
                 data.setdefault("anonymous_notes", [])
                 data.setdefault("pending_notes", {})
+                data.setdefault("reserved_keys", [])
 
                 if not isinstance(data["participants"], list):
                     data["participants"] = []
@@ -101,6 +101,8 @@ class Database:
                     data["anonymous_notes"] = []
                 if not isinstance(data["pending_notes"], dict):
                     data["pending_notes"] = {}
+                if not isinstance(data["reserved_keys"], list):
+                    data["reserved_keys"] = []
                 
                 return data
         except FileNotFoundError:
@@ -114,10 +116,10 @@ class Database:
                 "access_requests": {},
                 "anonymous_notes": [],
                 "pending_notes": {},
+                "reserved_keys": [],
                 "notes_stats": {"sent": 0, "approved": 0, "rejected": 0},
                 "settings": {
                     "total_participants": 20,
-                    "registration_open": True,
                     "anonymity_mode": "code",
                     "filter_enabled": True,
                     "moderation_enabled": True,
@@ -251,12 +253,35 @@ class Database:
         data["settings"]["registration_deadline"] = deadline.isoformat()
         await self._write_db(data)
     
-    @serialize_mutations
-    async def add_user(self, user_id: int, username: str, gender: str, wish: str, wish_link: str, key: int, display_name: str = ""):
-        """Добавляет нового участника"""
+    @staticmethod
+    def _is_distribution_started(data: Dict) -> bool:
+        """Синхронно проверяет, назначен ли хотя бы один получатель"""
+        return any(
+            isinstance(user_data, dict) and user_data.get("gift_to_user_id")
+            for user_data in data.get("users", {}).values()
+        )
+
+    async def is_distribution_started(self) -> bool:
+        """Проверяет, начато ли распределение (хотя бы одна пара назначена)"""
         data = await self._read_db()
+        return self._is_distribution_started(data)
+
+    @serialize_mutations
+    async def add_user(self, user_id: int, username: str, gender: str, wish: str, wish_link: str, key: int, display_name: str = "") -> Tuple[bool, str]:
+        """Добавляет нового участника. Возвращает (успех, причина отказа)"""
+        data = await self._read_db()
+        user_key = str(user_id)
         
-        data["users"][str(user_id)] = {
+        if user_key in data["users"]:
+            return False, "already_registered"
+        if self._is_distribution_started(data):
+            return False, "distribution_started"
+        if len(data["participants"]) >= data["settings"].get("total_participants", 20):
+            return False, "limit_reached"
+        if any(isinstance(u, dict) and u.get("key") == key for u in data["users"].values()):
+            return False, "key_taken"
+        
+        data["users"][user_key] = {
             "username": username,
             "display_name": display_name,
             "gender": gender,
@@ -275,8 +300,11 @@ class Database:
         
         if user_id not in data["participants"]:
             data["participants"].append(user_id)
+        if key in data["reserved_keys"]:
+            data["reserved_keys"].remove(key)
         
         await self._write_db(data)
+        return True, ""
     
     @serialize_mutations
     async def update_username(self, user_id: int, username: str) -> bool:
@@ -296,6 +324,9 @@ class Database:
         user_key = str(user_id)
         
         if user_key in data["users"]:
+            user_data = data["users"][user_key]
+            if user_data.get("gift_to_user_id") or user_data.get("wish_changes", 0) >= 3:
+                return False
             data["users"][user_key]["wish"] = new_wish
             data["users"][user_key]["wish_link"] = new_link
             data["users"][user_key]["wish_changes"] = data["users"][user_key].get("wish_changes", 0) + 1
@@ -311,6 +342,9 @@ class Database:
         user_key = str(user_id)
         
         if user_key in data["users"]:
+            user_data = data["users"][user_key]
+            if user_data.get("gift_to_user_id") or user_data.get("gender_changed", False):
+                return False
             data["users"][user_key]["gender"] = new_gender
             data["users"][user_key]["gender_changed"] = True
             
@@ -407,20 +441,26 @@ class Database:
     async def generate_unique_key(self) -> int:
         """Генерирует уникальный случайный 5-значный код подарка (10000-99999) для полной анонимности"""
         data = await self._read_db()
-        used_keys = set()
+        used_keys = set(data["reserved_keys"])
         for u in data.get("users", {}).values():
             if isinstance(u, dict) and u.get("key"):
                 used_keys.add(u["key"])
-                
-        import random
+        
+        key = None
         for _ in range(10000):
             candidate = random.randint(10000, 99999)
             if candidate not in used_keys:
-                await self._write_db(data)
-                return candidate
+                key = candidate
+                break
         
-        key = data.get("next_key", 10000)
-        data["next_key"] = key + 1
+        if key is None:
+            key = max(data.get("next_key", 100000), 100000)
+            while key in used_keys:
+                key += 1
+            data["next_key"] = key + 1
+        
+        # Резервируем ключ, чтобы параллельная регистрация не получила такой же
+        data["reserved_keys"].append(key)
         await self._write_db(data)
         return key
     
@@ -756,7 +796,7 @@ class Database:
             }
             
             wish_link = user_data.get("wish_link", "")
-            row["Ссылки"] = format_wish_links(wish_link) if wish_link else "Нет ссылок"
+            row["Ссылки"] = format_wish_links(wish_link, escape=False) if wish_link else "Нет ссылок"
             
             if user_data.get("gift_to_user_id"):
                 row["Дарит ID"] = user_data["gift_to_user_id"]
@@ -991,6 +1031,7 @@ class Database:
         data = await self._read_db()
         return data.get("settings", {}).get("anonymity_mode", "code")
 
+    @serialize_mutations
     async def cycle_anonymity_mode(self) -> str:
         """Переключает режим раскрытия подопечного по кругу: code -> name -> gender -> code"""
         data = await self._read_db()
@@ -1007,6 +1048,7 @@ class Database:
         data = await self._read_db()
         return data.get("settings", {}).get("filter_enabled", True)
 
+    @serialize_mutations
     async def toggle_filter(self) -> bool:
         """Переключает фильтр стоп-слов"""
         data = await self._read_db()
@@ -1021,6 +1063,7 @@ class Database:
         data = await self._read_db()
         return data.get("settings", {}).get("chat_enabled", True)
 
+    @serialize_mutations
     async def toggle_chat(self) -> bool:
         """Переключает работу анонимного чата"""
         data = await self._read_db()

@@ -31,7 +31,10 @@ class AccessMiddleware(BaseMiddleware):
                 return await handler(event, data)
 
             is_admin_callback = bool(callback_data) and (
-                callback_data.startswith(("admin_", "giver_", "receiver_", "select_", "reset_", "approve_user_", "reject_user_"))
+                callback_data.startswith((
+                    "admin_", "giver_", "receiver_", "select_", "reset_",
+                    "approve_user_", "reject_user_", "mod_appr_", "mod_rejl_", "broadcast_"
+                ))
                 or callback_data in {"continue_with_selected", "confirm_mixed_distribution"}
             )
             if is_admin_callback:

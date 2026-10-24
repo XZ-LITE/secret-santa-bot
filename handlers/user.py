@@ -86,6 +86,7 @@ async def cmd_start(message: Message, state: FSMContext):
         get_main_menu_text(
             first_name=display_name,
             total_participants=total_participants,
+            registration_deadline=await db.get_registration_deadline(),
             registered_count=registered_count,
             is_registered=is_registered,
             user_key=user_key
@@ -120,9 +121,9 @@ async def process_request_access(callback: CallbackQuery, bot: Bot):
     )
     await callback.answer("Заявка отправлена!")
     
-    user_name = callback.from_user.full_name
+    user_name = html.escape(callback.from_user.full_name, quote=False)
     if callback.from_user.username:
-        user_name += f" (@{callback.from_user.username})"
+        user_name += f" (@{html.escape(callback.from_user.username, quote=False)})"
     
     admin_text = (
         f"{E_BELL} <b>Новая заявка на участие в Тайном Санте!</b>\n\n"
@@ -142,7 +143,7 @@ async def process_request_access(callback: CallbackQuery, bot: Bot):
 @user_router.message(SetDisplayName.entering_display_name)
 async def process_display_name_for_existing_user(message: Message, state: FSMContext):
     """Обработка ввода имени для уже зарегистрированного пользователя"""
-    display_name = message.text.strip()
+    display_name = (message.text or "").strip()
     if not display_name:
         await message.answer(f"{E_CROSS} Имя не может быть пустым. Пожалуйста, введите ваше имя и фамилию:", parse_mode="HTML")
         return
@@ -155,8 +156,8 @@ async def process_display_name_for_existing_user(message: Message, state: FSMCon
     if success:
         await state.clear()
         await message.answer(
-            f"{E_CHECK} Спасибо, {display_name}! Теперь вы можете пользоваться ботом.",
-            reply_markup=get_start_keyboard(message.from_user.id),
+            f"{E_CHECK} Спасибо, {html.escape(display_name, quote=False)}! Теперь вы можете пользоваться ботом.",
+            reply_markup=get_start_keyboard(message.from_user.id, is_registered=True),
             parse_mode="HTML"
         )
     else:
@@ -193,7 +194,7 @@ def format_help_text(time_left_msg: str, total_participants: int, is_command: bo
 async def cmd_help(message: Message, state: FSMContext):
     """Показать справку по команде /help"""
     await state.clear()
-    _, time_left_msg = is_registration_open()
+    _, time_left_msg = is_registration_open(await db.get_registration_deadline())
     total_participants = await db.get_total_participants()
     help_text = format_help_text(time_left_msg, total_participants, is_command=True)
     await message.answer(help_text, reply_markup=get_help_keyboard(), parse_mode="HTML")
@@ -202,7 +203,7 @@ async def cmd_help(message: Message, state: FSMContext):
 async def show_help(callback: CallbackQuery, state: FSMContext):
     """Показать справку через инлайн-кнопку"""
     await state.clear()
-    _, time_left_msg = is_registration_open()
+    _, time_left_msg = is_registration_open(await db.get_registration_deadline())
     total_participants = await db.get_total_participants()
     help_text = format_help_text(time_left_msg, total_participants, is_command=False)
     await callback.message.edit_text(help_text, reply_markup=get_help_keyboard(), parse_mode="HTML")
@@ -311,10 +312,18 @@ async def show_myinfo(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(text, reply_markup=keyboard.as_markup(), parse_mode="HTML")
     await callback.answer()
 
+async def _get_registration_block_reason() -> Optional[str]:
+    """Возвращает текст причины, по которой новая регистрация невозможна, или None"""
+    if await db.is_distribution_started():
+        return f"{E_CROSS} Распределение подарков уже проведено, регистрация новых участников закрыта."
+    if await db.get_participants_count() >= await db.get_total_participants():
+        return f"{E_CROSS} Все места в игре уже заняты, регистрация закрыта."
+    return None
+
 @user_router.callback_query(F.data == "participate")
 async def start_registration(callback: CallbackQuery, state: FSMContext):
     """Начало процесса регистрации"""
-    is_open, status_msg = is_registration_open()
+    is_open, status_msg = is_registration_open(await db.get_registration_deadline())
     if not is_open:
         await callback.message.edit_text(
             f"{status_msg}\n\nРегистрация закрыта, вы не можете зарегистрироваться.",
@@ -333,6 +342,16 @@ async def start_registration(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             f"{E_CHECK} Вы уже зарегистрированы!\n\nНажмите кнопку ниже, чтобы посмотреть вашу анкету:",
             reply_markup=keyboard.as_markup(),
+            parse_mode="HTML"
+        )
+        await callback.answer()
+        return
+    
+    closed_reason = await _get_registration_block_reason()
+    if closed_reason:
+        await callback.message.edit_text(
+            closed_reason,
+            reply_markup=get_back_keyboard("back_to_main"),
             parse_mode="HTML"
         )
         await callback.answer()
@@ -370,7 +389,7 @@ async def process_gender(callback: CallbackQuery, state: FSMContext):
 @user_router.message(Registration.entering_display_name)
 async def process_display_name(message: Message, state: FSMContext):
     """Обработка ввода имени и фамилии"""
-    display_name = message.text.strip()
+    display_name = (message.text or "").strip()
     if not display_name:
         await message.answer(f"{E_CROSS} Имя не может быть пустым. Пожалуйста, введите ваше имя и фамилию:", parse_mode="HTML")
         return
@@ -382,7 +401,7 @@ async def process_display_name(message: Message, state: FSMContext):
     await state.update_data(display_name=display_name)
     
     await message.answer(
-        f"{E_EDIT} Отлично, {display_name}! Теперь напишите, что бы вы хотели получить в подарок (до {GIFT_BUDGET} рублей):\n\n"
+        f"{E_EDIT} Отлично, {html.escape(display_name, quote=False)}! Теперь напишите, что бы вы хотели получить в подарок (до {GIFT_BUDGET} рублей):\n\n"
         "Пример: 'Мягкая игрушка - панда' или 'Книга \"Мастер и Маргарита\"'\n"
         f"Вы можете указать несколько подарков, но общая сумма не должна превышать {GIFT_BUDGET} рублей.\n\n"
         "Просто отправьте сообщение с вашим желанием:",
@@ -416,7 +435,12 @@ async def back_from_gender(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     total_participants = await db.get_total_participants()
     await callback.message.edit_text(
-        get_main_menu_text(callback.from_user.first_name, total_participants),
+        get_main_menu_text(
+            first_name=callback.from_user.first_name,
+            total_participants=total_participants,
+            registration_deadline=await db.get_registration_deadline(),
+            registered_count=await db.get_participants_count()
+        ),
         reply_markup=get_start_keyboard(callback.from_user.id),
         parse_mode="HTML"
     )
@@ -425,6 +449,9 @@ async def back_from_gender(callback: CallbackQuery, state: FSMContext):
 @user_router.message(Registration.entering_wish)
 async def process_wish(message: Message, state: FSMContext):
     """Обработка ввода желания"""
+    if not message.text or not message.text.strip():
+        await message.answer(f"{E_CROSS} Пожалуйста, отправьте желание текстовым сообщением.", parse_mode="HTML")
+        return
     if len(message.text) > 200:
         await message.answer(f"{E_CROSS} Слишком длинное описание. Максимум 200 символов.", parse_mode="HTML")
         return
@@ -472,7 +499,17 @@ async def _complete_registration(
     data = await state.get_data()
     display_name = data.get("display_name", first_name)
     
-    await db.add_user(
+    is_open, status_msg = is_registration_open(await db.get_registration_deadline())
+    if not is_open:
+        await state.clear()
+        await message_target.answer(
+            f"{status_msg}\n\nРегистрация закрыта, вы не можете зарегистрироваться.",
+            reply_markup=get_back_keyboard("back_to_main"),
+            parse_mode="HTML"
+        )
+        return
+    
+    added, reason = await db.add_user(
         user_id=user_id,
         username=username or "",
         gender=data["gender"],
@@ -481,6 +518,20 @@ async def _complete_registration(
         key=data["key"],
         display_name=display_name
     )
+    if not added:
+        await state.clear()
+        reasons = {
+            "already_registered": f"{E_CHECK} Вы уже зарегистрированы!",
+            "distribution_started": f"{E_CROSS} Распределение подарков уже проведено, регистрация новых участников закрыта.",
+            "limit_reached": f"{E_CROSS} Все места в игре уже заняты, регистрация закрыта.",
+            "key_taken": f"{E_CROSS} Произошёл конфликт секретного кода. Пожалуйста, начните регистрацию заново.",
+        }
+        await message_target.answer(
+            reasons.get(reason, f"{E_CROSS} Не удалось завершить регистрацию."),
+            reply_markup=get_back_keyboard("back_to_main"),
+            parse_mode="HTML"
+        )
+        return
     
     count = await db.get_participants_count()
     total_participants = await db.get_total_participants()
@@ -524,7 +575,13 @@ async def _complete_registration(
 @user_router.message(Registration.entering_wish_link)
 async def process_wish_link(message: Message, state: FSMContext, bot: Bot):
     """Обработка ввода ссылки(ок) на подарок и финализация регистрации"""
-    text = message.text.strip()
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer(
+            f"{E_CROSS} Пожалуйста, отправьте ссылку текстом или «-», если ссылки нет.",
+            parse_mode="HTML"
+        )
+        return
     
     if text.lower() in ("-", "нет", "пропустить", "skip", "нету", "без ссылки", "0"):
         links_text = ""
@@ -535,7 +592,7 @@ async def process_wish_link(message: Message, state: FSMContext, bot: Bot):
             if link:
                 if not validate_wish_link(link):
                     await message.answer(
-                        f"{E_CROSS} <b>Некорректная ссылка:</b> <code>{link}</code>\n\n"
+                        f"{E_CROSS} <b>Некорректная ссылка:</b> <code>{html.escape(link, quote=False)}</code>\n\n"
                         "Пожалуйста, введите корректные ссылки (начинаются с http:// или https://).\n"
                         "Если ссылки нет, нажмите кнопку «Без ссылки» ниже или отправьте «-»:",
                         reply_markup=get_wish_link_keyboard("back_to_wish_input"),
@@ -577,7 +634,7 @@ async def back_to_wish_input(callback: CallbackQuery, state: FSMContext):
         return
     
     data = await state.get_data()
-    display_name = data.get("display_name", "пользователь")
+    display_name = html.escape(data.get("display_name", "пользователь"), quote=False)
     gender = data.get("gender", "неизвестно")
     gender_text = "Мужской" if gender == "male" else "Женский"
     
@@ -615,8 +672,8 @@ async def change_wish_menu(callback: CallbackQuery, state: FSMContext):
     
     text = (
         f"{E_EDIT} <b>Изменение желания</b>\n\n"
-        f"{E_USER} <b>Ваше имя:</b> {user_data.get('display_name', 'Не указано')}\n"
-        f"{E_GIFT} <b>Текущее желание:</b> {user_data['wish']}\n"
+        f"{E_USER} <b>Ваше имя:</b> {html.escape(user_data.get('display_name') or 'Не указано', quote=False)}\n"
+        f"{E_GIFT} <b>Текущее желание:</b> {html.escape(user_data.get('wish', ''), quote=False)}\n"
     )
     
     if "\n" in formatted_links:
@@ -634,6 +691,9 @@ async def change_wish_menu(callback: CallbackQuery, state: FSMContext):
 @user_router.message(ChangeWish.entering_new_wish)
 async def process_new_wish(message: Message, state: FSMContext):
     """Обработка нового желания"""
+    if not message.text or not message.text.strip():
+        await message.answer(f"{E_CROSS} Пожалуйста, отправьте желание текстовым сообщением.", parse_mode="HTML")
+        return
     if len(message.text) > 200:
         await message.answer(f"{E_CROSS} Слишком длинное описание. Максимум 200 символов.", parse_mode="HTML")
         return
@@ -651,7 +711,13 @@ async def process_new_wish(message: Message, state: FSMContext):
 @user_router.message(ChangeWish.entering_new_link)
 async def process_new_wish_link(message: Message, state: FSMContext):
     """Обработка новой ссылки(ок) на подарок"""
-    text = message.text.strip()
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer(
+            f"{E_CROSS} Пожалуйста, отправьте ссылку текстом или «-», если ссылки нет.",
+            parse_mode="HTML"
+        )
+        return
     
     if text.lower() in ("-", "нет", "пропустить", "skip", "нету", "без ссылки", "0"):
         links_text = ""
@@ -662,7 +728,7 @@ async def process_new_wish_link(message: Message, state: FSMContext):
             if link:
                 if not validate_wish_link(link):
                     await message.answer(
-                        f"{E_CROSS} <b>Некорректная ссылка:</b> <code>{link}</code>\n\n"
+                        f"{E_CROSS} <b>Некорректная ссылка:</b> <code>{html.escape(link, quote=False)}</code>\n\n"
                         "Пожалуйста, введите корректные ссылки (начинаются с http:// или https://).\n"
                         "Если ссылки нет, нажмите кнопку «Без ссылки» ниже или отправьте «-»:",
                         reply_markup=get_wish_link_keyboard("change_wish_menu"),
@@ -689,7 +755,7 @@ async def process_new_wish_link(message: Message, state: FSMContext):
         links_formatted = format_wish_links(links_text)
         response_text = (
             f"{E_CHECK} <b>Желание успешно обновлено!</b>\n\n"
-            f"{E_GIFT} <b>Новое желание:</b> «{data['new_wish']}»\n"
+            f"{E_GIFT} <b>Новое желание:</b> «{html.escape(data['new_wish'], quote=False)}»\n"
         )
         if links_text:
             response_text += f"{E_LINK} <b>Ссылки:</b> {links_formatted}\n\n"
@@ -697,7 +763,7 @@ async def process_new_wish_link(message: Message, state: FSMContext):
             response_text += f"{E_LINK} <b>Ссылки:</b> Без ссылки\n\n"
         response_text += f"{E_EDIT} Использовано изменений: {user_data.get('wish_changes', 0)} из 3"
     else:
-        response_text = f"{E_CROSS} Ошибка при изменении желания."
+        response_text = f"{E_CROSS} Не удалось изменить желание: лимит изменений исчерпан или распределение уже проведено."
         
     await message.answer(response_text, reply_markup=keyboard.as_markup(), parse_mode="HTML")
     await state.clear()
@@ -722,12 +788,12 @@ async def skip_new_wish_link_callback(callback: CallbackQuery, state: FSMContext
         user_data = await db.get_user(callback.from_user.id)
         response_text = (
             f"{E_CHECK} <b>Желание успешно обновлено!</b>\n\n"
-            f"{E_GIFT} <b>Новое желание:</b> «{data['new_wish']}»\n"
+            f"{E_GIFT} <b>Новое желание:</b> «{html.escape(data['new_wish'], quote=False)}»\n"
             f"{E_LINK} <b>Ссылки:</b> Без ссылки\n\n"
             f"{E_EDIT} Использовано изменений: {user_data.get('wish_changes', 0)} из 3"
         )
     else:
-        response_text = f"{E_CROSS} Ошибка при изменении желания."
+        response_text = f"{E_CROSS} Не удалось изменить желание: лимит изменений исчерпан или распределение уже проведено."
         
     await callback.message.edit_text(response_text, reply_markup=keyboard.as_markup(), parse_mode="HTML")
     await state.clear()
@@ -751,7 +817,7 @@ async def change_gender_menu(callback: CallbackQuery, state: FSMContext):
     gender_text = "Мужской" if user_data['gender'] == 'male' else "Женский"
     text = (
         f"{E_REPEAT} <b>Изменение пола</b>\n\n"
-        f"{E_USER} <b>Ваше имя:</b> {user_data.get('display_name', 'Не указано')}\n"
+        f"{E_USER} <b>Ваше имя:</b> {html.escape(user_data.get('display_name') or 'Не указано', quote=False)}\n"
         f"• <b>Текущий пол:</b> {gender_text}\n\n"
         f"Вы можете изменить пол только 1 раз!\n"
         f"Выберите новый пол:"
@@ -780,7 +846,7 @@ async def process_new_gender(callback: CallbackQuery, state: FSMContext):
         )
     else:
         await callback.message.edit_text(
-            f"{E_CROSS} Ошибка при изменении пола",
+            f"{E_CROSS} Не удалось изменить пол: смена уже использована или распределение уже проведено.",
             reply_markup=keyboard.as_markup(),
             parse_mode="HTML"
         )
@@ -816,6 +882,7 @@ async def back_to_main_menu(callback: CallbackQuery, state: FSMContext):
         get_main_menu_text(
             first_name=display_name,
             total_participants=total_participants,
+            registration_deadline=await db.get_registration_deadline(),
             registered_count=registered_count,
             is_registered=is_registered,
             user_key=user_key
@@ -900,10 +967,7 @@ async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
         )
         return
     
-    state_data = await state.get_data()
-    receiver_id = state_data.get("receiver_id")
-    if not receiver_id:
-        receiver_id = await db.get_receiver_for_user(message.from_user.id)
+    receiver_id = await db.get_receiver_for_user(message.from_user.id)
     
     if not receiver_id:
         await message.answer(f"{E_CROSS} Ошибка: подопечный не найден.", parse_mode="HTML")
@@ -980,7 +1044,7 @@ async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
     receiver_kb = InlineKeyboardBuilder()
     receiver_kb.button(
         text="Ответить Санте",
-        callback_data=f"reply_santa_{message.from_user.id}",
+        callback_data="reply_santa",
         icon_custom_emoji_id=emoji_id("new_message")
     )
     receiver_kb.adjust(1)
@@ -1021,22 +1085,18 @@ async def process_santa_question(message: Message, state: FSMContext, bot: Bot):
         parse_mode="HTML"
     )
 
-@user_router.callback_query(F.data.startswith("reply_santa_"))
+@user_router.callback_query(F.data.startswith("reply_santa"))
 async def reply_santa_start(callback: CallbackQuery, state: FSMContext):
     """Подопечный нажимает кнопку 'Ответить Санте'"""
     if not await db.is_chat_enabled():
         await callback.answer("Анонимный чат временно отключен организатором", show_alert=True)
         return
         
-    try:
-        santa_id = int(callback.data.replace("reply_santa_", ""))
-    except ValueError:
-        await callback.answer("Ошибка в данных запроса.", show_alert=True)
+    # Санта определяется только по базе: callback_data не содержит ID и не может быть подделан
+    santa_id = await db.get_santa_for_user(callback.from_user.id)
+    if not santa_id:
+        await callback.answer("Ваш Тайный Санта не найден (возможно, распределение было сброшено).", show_alert=True)
         return
-    
-    actual_santa = await db.get_santa_for_user(callback.from_user.id)
-    if actual_santa:
-        santa_id = actual_santa
     
     if not await db.check_anonymous_rate_limit(callback.from_user.id, limit=5, window_seconds=60):
         await callback.answer("Слишком много сообщений! Подождите минуту.", show_alert=True)
@@ -1102,10 +1162,7 @@ async def process_receiver_reply(message: Message, state: FSMContext, bot: Bot):
         )
         return
     
-    state_data = await state.get_data()
-    santa_id = state_data.get("santa_id")
-    if not santa_id:
-        santa_id = await db.get_santa_for_user(message.from_user.id)
+    santa_id = await db.get_santa_for_user(message.from_user.id)
     
     if not santa_id:
         await message.answer(f"{E_CROSS} Ошибка: ваш Тайный Санта не найден.", parse_mode="HTML")

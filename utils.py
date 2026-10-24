@@ -1,6 +1,4 @@
 import re
-import os
-import json
 import html
 import datetime
 import asyncio
@@ -8,13 +6,13 @@ import logging
 from typing import Tuple, Optional
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
-from config import DB_PATH, GIFT_BUDGET
+from config import GIFT_BUDGET
 
 from urllib.parse import urlparse
 from custom_emojis import (
     E_USER, E_GIFT, E_GIFT_STAR, E_CROSS,
     E_HOURGLASS, E_PARTY, E_TAG,
-    E_LINK, E_STATS, E_FILE
+    E_LINK, E_STATS, E_FILE, E_CLOCK, E_BELL
 )
 
 def check_deanonymization_text(text: str) -> Optional[str]:
@@ -115,8 +113,8 @@ def validate_wish_link(link: str) -> bool:
     except Exception:
         return False
 
-def format_wish_links(wish_link: str) -> str:
-    """Форматирует несколько ссылок для красивого отображения"""
+def format_wish_links(wish_link: str, escape: bool = True) -> str:
+    """Форматирует несколько ссылок для красивого отображения (по умолчанию с HTML-экранированием)"""
     if not wish_link:
         return "Нет ссылки"
     
@@ -124,7 +122,7 @@ def format_wish_links(wish_link: str) -> str:
     for link in re.split(r'[,\n\s]+', wish_link):
         link = link.strip()
         if link:
-            links.append(link)
+            links.append(html.escape(link, quote=False) if escape else link)
     
     if len(links) == 1:
         return links[0]
@@ -178,7 +176,7 @@ def format_admin_user_info(user_data: dict, user_id: str) -> str:
         
         receiver_name = "ID " + str(gift_to)
         if 'gift_to_name' in user_data and user_data['gift_to_name']:
-            receiver_name = user_data['gift_to_name']
+            receiver_name = html.escape(user_data['gift_to_name'], quote=False)
         
         info.append(f"{E_GIFT} Дарит: {gender_text} ({receiver_name})")
     
@@ -235,7 +233,7 @@ def format_admin_user_card(
         gift_to_name = user_data.get('gift_to_name')
         if not gift_to_name and all_users and str(gift_to_id) in all_users:
             gift_to_name = all_users[str(gift_to_id)].get('display_name') or all_users[str(gift_to_id)].get('username')
-        gift_to_name_str = f" ({gift_to_name})" if gift_to_name else f" (ID: {gift_to_id})"
+        gift_to_name_str = f" ({html.escape(gift_to_name, quote=False)})" if gift_to_name else f" (ID: {gift_to_id})"
         text += f"\n{E_GIFT} <b>Кому дарит:</b> {gift_to_gender}{gift_to_name_str}\n"
         
         # Кто дарит ему:
@@ -247,7 +245,7 @@ def format_admin_user_card(
                     break
             if santa_id and santa_id in all_users:
                 santa_data = all_users[santa_id]
-                santa_name = santa_data.get('display_name') or santa_data.get('username') or f"ID {santa_id}"
+                santa_name = html.escape(santa_data.get('display_name') or santa_data.get('username') or f"ID {santa_id}", quote=False)
                 santa_key = f"#{santa_data.get('key')}" if santa_data.get('key') else ""
                 text += f"{E_GIFT_STAR} <b>Кто дарит ему:</b> {santa_name} {santa_key}\n"
                 
@@ -262,24 +260,19 @@ def get_default_registration_deadline() -> datetime.datetime:
         deadline = datetime.datetime(now.year + 1, 12, 28, 23, 59, 59)
     return deadline
 
-def get_registration_deadline() -> datetime.datetime:
-    """Получает дедлайн регистрации из базы данных или использует значение по умолчанию"""
-    try:
-        if os.path.exists(DB_PATH):
-            with open(DB_PATH, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                deadline_str = data.get("settings", {}).get("registration_deadline")
-                if deadline_str:
-                    return datetime.datetime.fromisoformat(deadline_str)
-    except Exception:
-        pass
-    
-    return get_default_registration_deadline()
+def format_days_left(days: int) -> str:
+    """Возвращает «N день/дня/дней» с правильным склонением"""
+    if days % 10 == 1 and days % 100 != 11:
+        word = "день"
+    elif 2 <= days % 10 <= 4 and not 12 <= days % 100 <= 14:
+        word = "дня"
+    else:
+        word = "дней"
+    return f"{days} {word}"
 
-def is_registration_open() -> Tuple[bool, str]:
+def is_registration_open(registration_deadline: datetime.datetime) -> Tuple[bool, str]:
     """Проверяет, открыта ли регистрация"""
     now = datetime.datetime.now()
-    registration_deadline = get_registration_deadline()
     
     if now > registration_deadline:
         return False, f"{E_CROSS} Регистрация закрыта! Дедлайн был {registration_deadline.strftime('%d.%m.%Y %H:%M')}"
@@ -289,12 +282,43 @@ def is_registration_open() -> Tuple[bool, str]:
     hours = time_left.seconds // 3600
     
     if days > 0:
-        time_text = f"{days} дней {hours} часов"
+        time_text = f"{format_days_left(days)} {hours} часов"
     else:
         minutes = (time_left.seconds % 3600) // 60
         time_text = f"{hours} часов {minutes} минут"
     
     return True, f"{E_HOURGLASS} Регистрация открыта! Осталось: {time_text}"
+
+def build_registration_reminder(registration_deadline: datetime.datetime, now: datetime.datetime) -> str:
+    """Формирует текст напоминания о регистрации в зависимости от оставшегося времени"""
+    days_left = (registration_deadline - now).days
+    deadline_str = registration_deadline.strftime('%d.%m.%Y %H:%M')
+    if days_left < 1:
+        return (
+            f"{E_CLOCK} <b>СРОЧНОЕ НАПОМИНАНИЕ!</b>\n\n"
+            "До закрытия регистрации в Тайном Санте осталось <b>меньше суток</b>!\n"
+            f"Успейте зарегистрироваться до {deadline_str}!\n\n"
+            "Нажмите /start для регистрации."
+        )
+    if days_left == 1:
+        return (
+            f"{E_CLOCK} <b>СРОЧНОЕ НАПОМИНАНИЕ!</b>\n\n"
+            "До закрытия регистрации в Тайном Санте остался <b>1 ДЕНЬ</b>!\n"
+            f"Успейте зарегистрироваться до {deadline_str}!\n\n"
+            "Нажмите /start для регистрации."
+        )
+    if days_left <= 3:
+        return (
+            f"{E_BELL} <b>Напоминание о Тайном Санте!</b>\n\n"
+            f"До закрытия регистрации осталось <b>{format_days_left(days_left)}</b>!\n"
+            f"Не забудьте зарегистрироваться до {deadline_str}\n\n"
+            "Нажмите /start для регистрации."
+        )
+    return (
+        f"{E_BELL} <b>Напоминание о Тайном Санте!</b>\n\n"
+        f"Не забудьте зарегистрироваться до {deadline_str}\n\n"
+        "Нажмите /start для регистрации."
+    )
 
 def generate_progress_bar(current: int, total: int, length: int = 10) -> str:
     """Генерирует аккуратный визуальный прогресс-бар"""
@@ -308,13 +332,14 @@ def generate_progress_bar(current: int, total: int, length: int = 10) -> str:
 def get_main_menu_text(
     first_name: str,
     total_participants: int,
+    registration_deadline: datetime.datetime,
     registered_count: int = 0,
     is_registered: bool = False,
     user_key: Optional[int] = None
 ) -> str:
     """Получить красивый текст главного меню с адаптацией под статус участника"""
-    first_name = html.escape(first_name, quote=False)
-    is_open, status_msg = is_registration_open()
+    first_name = html.escape(first_name or "", quote=False)
+    is_open, status_msg = is_registration_open(registration_deadline)
     progress = generate_progress_bar(registered_count, total_participants)
     
     if is_registered:

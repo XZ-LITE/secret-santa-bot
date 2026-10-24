@@ -5,10 +5,13 @@ import html
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import ADMIN_IDS, GIFT_BUDGET
-from utils import format_wish_links, format_recipient_info_for_santa, send_message_safe
+from utils import (
+    format_wish_links, format_recipient_info_for_santa, send_message_safe,
+    build_registration_reminder
+)
 from database import Database
 from custom_emojis import (
-    E_CLOCK, E_BELL, E_PARTY, E_SPARKLES,
+    E_PARTY, E_SPARKLES,
     E_MONEY, E_STATS, E_CROWN, E_LINK, E_INFO, emoji_id
 )
 
@@ -30,28 +33,7 @@ async def send_registration_reminders(bot: Bot, db: Database) -> int:
                 
             last_reminder = await db.get_last_reminder(user_id)
             if last_reminder is None or (now - last_reminder).total_seconds() > 86400:
-                days_left = (registration_deadline - now).days
-                
-                if days_left == 1:
-                    message = (
-                        f"{E_CLOCK} <b>СРОЧНОЕ НАПОМИНАНИЕ!</b>\n\n"
-                        "До закрытия регистрации в Тайном Санте остался <b>1 ДЕНЬ</b>!\n"
-                        "Успейте зарегистрироваться до конца завтрашнего дня!\n\n"
-                        "Нажмите /start для регистрации."
-                    )
-                elif days_left <= 3:
-                    message = (
-                        f"{E_BELL} <b>Напоминание о Тайном Санте!</b>\n\n"
-                        f"До закрытия регистрации осталось <b>{days_left} дня</b>!\n"
-                        f"Не забудьте зарегистрироваться до {registration_deadline.strftime('%d.%m.%Y %H:%M')}\n\n"
-                        "Нажмите /start для регистрации."
-                    )
-                else:
-                    message = (
-                        f"{E_BELL} <b>Напоминание о Тайном Санте!</b>\n\n"
-                        f"Не забудьте зарегистрироваться до {registration_deadline.strftime('%d.%m.%Y %H:%M')}\n\n"
-                        "Нажмите /start для регистрации."
-                    )
+                message = build_registration_reminder(registration_deadline, now)
                 
                 success, send_error = await send_message_safe(bot, user_id, message, parse_mode="HTML")
                 if success:

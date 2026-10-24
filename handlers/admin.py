@@ -45,7 +45,8 @@ from utils import (
     format_admin_user_card,
     format_wish_links,
     format_recipient_info_for_santa,
-    send_message_safe
+    send_message_safe,
+    build_registration_reminder
 )
 from custom_emojis import (
     E_USER, E_USERS, E_GIFT, E_GIFT_STAR, E_CHECK, E_CROSS,
@@ -66,8 +67,8 @@ async def cmd_admin(message: Message, state: FSMContext):
         await message.answer(f"{E_CROSS} У вас нет прав администратора.", parse_mode="HTML")
         return
     await state.clear()
-    is_open, time_left_msg = is_registration_open()
     deadline = await db.get_registration_deadline()
+    is_open, time_left_msg = is_registration_open(deadline)
     
     await message.answer(
         f"{E_CROWN} <b>Панель администратора Тайного Санты</b>\n\n"
@@ -85,8 +86,8 @@ async def admin_panel(callback: CallbackQuery, state: FSMContext):
         await callback.answer("У вас нет доступа к админ-панели", show_alert=True)
         return
     
-    is_open, time_left_msg = is_registration_open()
     deadline = await db.get_registration_deadline()
+    is_open, time_left_msg = is_registration_open(deadline)
     
     await callback.message.edit_text(
         f"{E_CROWN} <b>Панель администратора Тайного Санты</b>\n\n"
@@ -106,8 +107,8 @@ async def admin_stats(callback: CallbackQuery):
     unregistered = await db.get_unregistered_users()
     allowed_users = await db.get_allowed_users()
     
-    is_open, time_left_msg = is_registration_open()
     deadline = await db.get_registration_deadline()
+    is_open, time_left_msg = is_registration_open(deadline)
     
     not_added_count = max(0, total_participants - len(allowed_users))
     text = (
@@ -179,10 +180,10 @@ async def admin_pending_requests(callback: CallbackQuery):
     keyboard = InlineKeyboardBuilder()
     text = f"{E_BELL} <b>Ожидающие заявки на доступ ({len(requests)}):</b>\n\n"
     for uid_str, req_data in requests.items():
-        name = req_data.get("full_name", f"ID {uid_str}")
+        name = req_data.get("full_name") or f"ID {uid_str}"
         if req_data.get("username"):
             name += f" (@{req_data['username']})"
-        text += f"• {name} (<code>ID: {uid_str}</code>)\n"
+        text += f"• {html.escape(name, quote=False)} (<code>ID: {uid_str}</code>)\n"
         keyboard.button(text=f"Одобрить {name[:12]}", callback_data=f"approve_user_{uid_str}", icon_custom_emoji_id=emoji_id("check"))
         keyboard.button(text=f"Отклонить {name[:12]}", callback_data=f"reject_user_{uid_str}", icon_custom_emoji_id=emoji_id("cross"))
     
@@ -206,6 +207,7 @@ async def admin_approve_user(callback: CallbackQuery, bot: Bot):
         user_name = req_data.get("full_name") or user_name
         if req_data.get("username"):
             user_name += f" (@{req_data['username']})"
+    user_name = html.escape(user_name, quote=False)
     
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="В панель управления", callback_data="admin_manage_users", icon_custom_emoji_id=emoji_id("back"))
@@ -240,6 +242,7 @@ async def admin_reject_user(callback: CallbackQuery, bot: Bot):
         user_name = req_data.get("full_name") or user_name
         if req_data.get("username"):
             user_name += f" (@{req_data['username']})"
+    user_name = html.escape(user_name, quote=False)
     
     keyboard = InlineKeyboardBuilder()
     keyboard.button(text="В панель управления", callback_data="admin_manage_users", icon_custom_emoji_id=emoji_id("back"))
@@ -280,7 +283,7 @@ async def admin_add_user_menu(callback: CallbackQuery, state: FSMContext):
 @admin_router.message(AdminAddUser.entering_user_id)
 async def admin_add_user_process(message: Message, state: FSMContext):
     """Обработка добавления пользователя"""
-    user_input = message.text.strip()
+    user_input = (message.text or "").strip()
     
     if user_input.startswith('@'):
         username = user_input[1:].lower()
@@ -370,7 +373,7 @@ async def admin_remove_user_menu(callback: CallbackQuery, state: FSMContext):
 @admin_router.message(AdminRemoveUser.entering_user_id)
 async def admin_remove_user_process(message: Message, state: FSMContext):
     """Обработка удаления пользователя"""
-    user_input = message.text.strip()
+    user_input = (message.text or "").strip()
     if not user_input.isdigit():
         await message.answer(f"{E_CROSS} Пожалуйста, введите числовой Telegram ID", parse_mode="HTML")
         return
@@ -512,6 +515,7 @@ async def admin_user_edit_name(callback: CallbackQuery, state: FSMContext):
     uid = int(callback.data.replace("admin_user_edit_name_", ""))
     user_data = await db.get_user(uid)
     current_name = (user_data.get("display_name") or user_data.get("username") or f"ID {uid}") if user_data else f"ID {uid}"
+    current_name = html.escape(current_name, quote=False)
     
     await state.update_data(user_id=uid)
     keyboard = InlineKeyboardBuilder()
@@ -530,13 +534,21 @@ async def admin_user_edit_name(callback: CallbackQuery, state: FSMContext):
 @admin_router.message(AdminEditDisplayName.entering_display_name)
 async def admin_edit_display_name_process(message: Message, state: FSMContext):
     """Сохранение нового имени участника"""
-    display_name = message.text.strip()
+    display_name = (message.text or "").strip()
     state_data = await state.get_data()
     user_id = state_data.get("user_id")
     
     if not user_id:
         await message.answer(f"{E_CROSS} Ошибка: не найден ID пользователя", parse_mode="HTML")
         await state.clear()
+        return
+    
+    if not display_name:
+        await message.answer(f"{E_CROSS} Имя не может быть пустым. Введите имя и фамилию текстом:", parse_mode="HTML")
+        return
+    
+    if len(display_name) > 50:
+        await message.answer(f"{E_CROSS} Слишком длинное имя. Максимум 50 символов.", parse_mode="HTML")
         return
     
     success = await db.update_display_name(user_id, display_name)
@@ -549,7 +561,7 @@ async def admin_edit_display_name_process(message: Message, state: FSMContext):
     
     if success:
         await message.answer(
-            f"{E_CHECK} Имя участника успешно обновлено на: <b>{display_name}</b>!",
+            f"{E_CHECK} Имя участника успешно обновлено на: <b>{html.escape(display_name, quote=False)}</b>!",
             reply_markup=keyboard.as_markup(),
             parse_mode="HTML"
         )
@@ -603,6 +615,7 @@ async def admin_user_msg_start(callback: CallbackQuery, state: FSMContext):
     uid = int(callback.data.replace("admin_user_msg_", ""))
     user_data = await db.get_user(uid)
     name = (user_data.get("display_name") or user_data.get("username") or f"ID {uid}") if user_data else f"ID {uid}"
+    name = html.escape(name, quote=False)
     
     await state.update_data(target_user_id=uid, target_user_name=name)
     keyboard = InlineKeyboardBuilder()
@@ -654,6 +667,7 @@ async def admin_user_del_confirm(callback: CallbackQuery):
     
     user_data = await db.get_user(uid)
     name = (user_data.get("display_name") or user_data.get("username") or f"ID {uid}") if user_data else f"ID {uid}"
+    name = html.escape(name, quote=False)
     
     text = (
         f"{E_WARNING} <b>Подтверждение удаления</b>\n\n"
@@ -695,12 +709,10 @@ async def admin_user_del_do(callback: CallbackQuery):
         reply_markup=get_admin_users_list_keyboard(users_list, page=0),
         parse_mode="HTML"
     )
-    await callback.answer()
 
 @admin_router.callback_query(F.data.in_({"admin_remove_user", "admin_edit_display_name", "admin_reset_changes"}))
 async def admin_redirect_to_users_list(callback: CallbackQuery, state: FSMContext):
     """Перенаправление устаревших меню в интерактивный список участников"""
-    await callback.answer()
     await admin_users_list(callback, state)
 
 @admin_router.callback_query(F.data == "admin_noop")
@@ -728,7 +740,7 @@ async def admin_set_participants_menu(callback: CallbackQuery, state: FSMContext
 @admin_router.message(AdminSetParticipants.entering_count)
 async def admin_set_participants_process(message: Message, state: FSMContext):
     """Обработка установки количества участников"""
-    user_input = message.text.strip()
+    user_input = (message.text or "").strip()
     if not user_input.isdigit():
         await message.answer(f"{E_CROSS} Пожалуйста, введите число", parse_mode="HTML")
         return
@@ -787,7 +799,7 @@ async def admin_search_user_menu(callback: CallbackQuery, state: FSMContext):
 @admin_router.message(AdminSearchUser.entering_query)
 async def admin_search_user_process(message: Message, state: FSMContext):
     """Обработка поиска участника"""
-    query = message.text.strip()
+    query = (message.text or "").strip()
     if not query:
         await message.answer(f"{E_CROSS} Пожалуйста, введите запрос для поиска", parse_mode="HTML")
         return
@@ -798,7 +810,7 @@ async def admin_search_user_process(message: Message, state: FSMContext):
         keyboard.button(text="Попробовать снова", icon_custom_emoji_id=emoji_id("search"), callback_data="admin_search_user")
         keyboard.button(text="Список участников", icon_custom_emoji_id=emoji_id("users"), callback_data="admin_users_list")
         keyboard.adjust(1)
-        await message.answer(f"{E_CROSS} По запросу «<b>{query}</b>» участники не найдены.", reply_markup=keyboard.as_markup(), parse_mode="HTML")
+        await message.answer(f"{E_CROSS} По запросу «<b>{html.escape(query, quote=False)}</b>» участники не найдены.", reply_markup=keyboard.as_markup(), parse_mode="HTML")
         await state.clear()
         return
     
@@ -825,7 +837,7 @@ async def admin_search_user_process(message: Message, state: FSMContext):
     keyboard.adjust(*( [1] * min(len(results), 10) + [1, 1] ))
     
     await message.answer(
-        f"{E_SEARCH} Найдено участников по запросу «<b>{query}</b>»: <b>{len(results)}</b>\n\n"
+        f"{E_SEARCH} Найдено участников по запросу «<b>{html.escape(query, quote=False)}</b>»: <b>{len(results)}</b>\n\n"
         f"Нажмите на участника, чтобы открыть его карточку и управлять им:",
         reply_markup=keyboard.as_markup(),
         parse_mode="HTML"
@@ -927,6 +939,11 @@ async def admin_settings(callback: CallbackQuery, state: FSMContext):
 async def admin_anonymity_menu(callback: CallbackQuery, state: FSMContext):
     """Меню управления анонимностью, фильтрами и чатом"""
     await state.clear()
+    await _render_anonymity_menu(callback)
+    await callback.answer()
+
+async def _render_anonymity_menu(callback: CallbackQuery):
+    """Отрисовывает меню приватности (без ответа на callback)"""
     mode = await db.get_anonymity_mode()
     is_filter = await db.is_filter_enabled()
     is_mod = await db.is_moderation_enabled()
@@ -981,7 +998,6 @@ async def admin_anonymity_menu(callback: CallbackQuery, state: FSMContext):
         ),
         parse_mode="HTML"
     )
-    await callback.answer()
 
 @admin_router.callback_query(F.data == "admin_anon_mode_cycle")
 async def admin_anon_mode_cycle_handler(callback: CallbackQuery, state: FSMContext):
@@ -992,32 +1008,32 @@ async def admin_anon_mode_cycle_handler(callback: CallbackQuery, state: FSMConte
         "name": "По имени (Классический)",
         "gender": "По полу (Парню/Девушке)"
     }
+    await _render_anonymity_menu(callback)
     await callback.answer(f"Режим изменен: {mode_titles.get(new_mode, new_mode)}!", show_alert=True)
-    await admin_anonymity_menu(callback, state)
 
 @admin_router.callback_query(F.data == "admin_toggle_filter")
 async def admin_toggle_filter_handler(callback: CallbackQuery, state: FSMContext):
     """Переключение автофильтра стоп-слов"""
     new_val = await db.toggle_filter()
     status_str = "ВКЛЮЧЕН" if new_val else "ВЫКЛЮЧЕН"
+    await _render_anonymity_menu(callback)
     await callback.answer(f"Автофильтр деанонимизации: {status_str}!", show_alert=True)
-    await admin_anonymity_menu(callback, state)
 
 @admin_router.callback_query(F.data == "admin_toggle_chat")
 async def admin_toggle_chat_handler(callback: CallbackQuery, state: FSMContext):
     """Переключение работы анонимного чата"""
     new_val = await db.toggle_chat()
     status_str = "ВКЛЮЧЕН" if new_val else "ВЫКЛЮЧЕН"
+    await _render_anonymity_menu(callback)
     await callback.answer(f"Анонимный чат: {status_str}!", show_alert=True)
-    await admin_anonymity_menu(callback, state)
 
 @admin_router.callback_query(F.data == "admin_toggle_moderation")
 async def admin_toggle_moderation_handler(callback: CallbackQuery, state: FSMContext):
     """Переключение премодерации записок"""
     new_val = await db.toggle_moderation()
     status_str = "ВКЛЮЧЕНА" if new_val else "ВЫКЛЮЧЕНА"
+    await _render_anonymity_menu(callback)
     await callback.answer(f"Премодерация записок: {status_str}!", show_alert=True)
-    await admin_anonymity_menu(callback, state)
 
 @admin_router.callback_query(F.data == "admin_set_deadline")
 async def admin_set_deadline_menu(callback: CallbackQuery, state: FSMContext):
@@ -1037,7 +1053,7 @@ async def admin_set_deadline_menu(callback: CallbackQuery, state: FSMContext):
 @admin_router.message(AdminSetDeadline.entering_date)
 async def admin_set_deadline_date(message: Message, state: FSMContext):
     """Обработка ввода даты дедлайна"""
-    date_str = message.text.strip()
+    date_str = (message.text or "").strip()
     try:
         day, month, year = map(int, date_str.split('.'))
         date = datetime.datetime(year, month, day)
@@ -1055,7 +1071,7 @@ async def admin_set_deadline_date(message: Message, state: FSMContext):
 @admin_router.message(AdminSetDeadline.entering_time)
 async def admin_set_deadline_time(message: Message, state: FSMContext):
     """Обработка ввода времени дедлайна"""
-    time_str = message.text.strip()
+    time_str = (message.text or "").strip()
     try:
         state_data = await state.get_data()
         date = state_data["date"]
@@ -1266,7 +1282,7 @@ async def admin_manual_distribute_select_giver(callback: CallbackQuery, state: F
             available_receivers[uid] = udata
     
     giver_data = users.get(giver_id_str, {})
-    giver_name = giver_data.get("display_name") or giver_data.get("username", f"ID {giver_id}")
+    giver_name = html.escape(giver_data.get("display_name") or giver_data.get("username") or f"ID {giver_id}", quote=False)
     
     if not available_receivers:
         await callback.message.edit_text(
@@ -1317,8 +1333,8 @@ async def admin_manual_distribute_select_receiver(callback: CallbackQuery, state
     giver_data = users.get(str(giver_id), {})
     receiver_data = users.get(receiver_id_str, {})
     
-    giver_name = giver_data.get("display_name") or giver_data.get("username", f"ID {giver_id}")
-    receiver_name = receiver_data.get("display_name") or receiver_data.get("username", f"ID {receiver_id}")
+    giver_name = html.escape(giver_data.get("display_name") or giver_data.get("username") or f"ID {giver_id}", quote=False)
+    receiver_name = html.escape(receiver_data.get("display_name") or receiver_data.get("username") or f"ID {receiver_id}", quote=False)
     
     success = await db.manual_distribution(giver_id, receiver_id)
     if success:
@@ -1428,13 +1444,27 @@ async def prepare_and_show_broadcast_preview(
     rendered_body = render_text_with_custom_emojis(raw_html)
     final_message_text = f"{header}\n\n{rendered_body}" if header else rendered_body
 
+    # Проверяем итоговую длину (с заголовком и премиум-эмодзи), чтобы не резать HTML-теги
+    if photo_id and len(final_message_text) > 1024:
+        await message.answer(
+            f"{E_CROSS} Подпись к фотографии вместе с заголовком слишком длинная ({len(final_message_text)}/1024 симв.). Пожалуйста, сократите текст.",
+            parse_mode="HTML"
+        )
+        return
+    elif not photo_id and len(final_message_text) > 4096:
+        await message.answer(
+            f"{E_CROSS} Сообщение вместе с заголовком слишком длинное ({len(final_message_text)}/4096 симв.). Пожалуйста, сократите текст.",
+            parse_mode="HTML"
+        )
+        return
+
     await state.update_data(
         broadcast_recipient_ids=recipient_ids,
         broadcast_final_text=final_message_text,
         broadcast_photo_id=photo_id,
         broadcast_target_desc=target_desc,
         broadcast_cancel_callback=cancel_callback,
-        broadcast_back_state=back_state
+        broadcast_back_state=back_state.state if back_state else None
     )
 
     caption_preview = (
@@ -1456,7 +1486,7 @@ async def prepare_and_show_broadcast_preview(
         else:
             await message.answer_photo(
                 photo=photo_id,
-                caption=final_message_text[:1024],
+                caption=final_message_text,
                 parse_mode="HTML"
             )
             await message.answer(
@@ -1749,27 +1779,9 @@ async def admin_remind(callback: CallbackQuery, bot: Bot):
         await callback.answer()
         return
     
-    days_left = (registration_deadline - now).days
+    msg = build_registration_reminder(registration_deadline, now)
     reminders_sent = 0
     for uid in unregistered:
-        if days_left == 1:
-            msg = (
-                f"{E_CLOCK} <b>СРОЧНОЕ НАПОМИНАНИЕ!</b>\n\n"
-                f"До закрытия регистрации в Тайном Санте остался <b>1 ДЕНЬ</b>!\n"
-                f"Нажмите /start для регистрации."
-            )
-        elif days_left <= 3:
-            msg = (
-                f"{E_BELL} <b>Напоминание о Тайном Санте!</b>\n\n"
-                f"Осталось <b>{days_left} дня</b>! Нажмите /start для регистрации."
-            )
-        else:
-            msg = (
-                f"{E_BELL} <b>Напоминание о Тайном Санте!</b>\n\n"
-                f"Не забудьте зарегистрироваться до <b>{registration_deadline.strftime('%d.%m.%Y %H:%M')}</b>\n"
-                f"Нажмите /start."
-            )
-        
         success, _ = await send_message_safe(bot, uid, msg, parse_mode="HTML")
         if success:
             await db.update_last_reminder(uid)
@@ -1819,7 +1831,7 @@ async def admin_approve_note(callback: CallbackQuery, bot: Bot):
         receiver_kb = InlineKeyboardBuilder()
         receiver_kb.button(
             text="Ответить Санте",
-            callback_data=f"reply_santa_{sender_id}",
+            callback_data="reply_santa",
             icon_custom_emoji_id=emoji_id("new_message")
         )
         receiver_kb.adjust(1)
@@ -1970,8 +1982,8 @@ async def admin_reveal_do(callback: CallbackQuery, bot: Bot):
         receiver_id = p["receiver_id"]
         all_users.add(giver_id)
         all_users.add(receiver_id)
-        santa_map[receiver_id] = p["giver_name"]
-        receiver_map[giver_id] = (p["receiver_name"], p["receiver_key"])
+        santa_map[receiver_id] = html.escape(str(p["giver_name"]), quote=False)
+        receiver_map[giver_id] = (html.escape(str(p["receiver_name"]), quote=False), p["receiver_key"])
     
     success_count = 0
     fail_count = 0
